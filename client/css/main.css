@@ -109,10 +109,29 @@ html:has(.hero){background:#14213d} /* no cream strip showing when a phone over-
 @media(hover:hover){.portal:hover{background:var(--gold);color:#14213d;border-color:var(--gold)}.portal:hover::after{color:#14213d}}
 @media(max-height:480px){.hero{justify-content:flex-start;gap:14px}.portal{padding:14px}.hero h1{font-size:1.7rem}} /* phone turned sideways */
 @media(prefers-reduced-motion:reduce){.portal{transition:none}}
-
 /* Receipt + print */
-.receipt{font:13px/1.5 ui-monospace,Menlo,monospace}.receipt hr{border:0;border-top:1px dashed var(--mute)}.receipt .r{display:flex;justify-content:space-between;gap:10px}
-@media print{body *{visibility:hidden}.receipt,.receipt *{visibility:visible}.receipt{position:absolute;left:0;top:0;width:80mm;color:#000}}
+.receipt{font:13px/1.5 ui-monospace,Menlo,monospace;text-align:left}
+.receipt hr{border:0;border-top:1px dashed var(--mute)}
+.receipt .r{display:flex;justify-content:space-between;gap:10px}
+
+@media print{
+  @page{size:80mm auto;margin:0}
+  html,body{background:#fff!important;margin:0!important;padding:0!important;height:auto!important;min-height:0!important;overflow:visible!important;display:block!important}
+  body *{visibility:hidden}
+  dialog:has(.receipt){
+    visibility:visible;display:block;
+    position:absolute;top:0;left:0;right:auto;bottom:auto;
+    width:80mm;max-width:80mm;height:auto;max-height:none;
+    margin:0;padding:0;overflow:visible;
+    border:0;border-radius:0;box-shadow:none;background:#fff;color:#000;transform:none}
+  dialog:has(.receipt)::backdrop{background:none;display:none}
+
+  .receipt,.receipt *{visibility:visible;color:#000!important;background:transparent!important}
+  .receipt{position:static;width:100%;max-height:none;overflow:visible;padding:3mm;font-size:12px;break-inside:auto;page-break-inside:auto}
+  .receipt .r{break-inside:avoid}
+  dialog:has(.receipt) .actions,dialog:has(.receipt) button{display:none!important}
+}
+
 @media(max-width:999px){.desk-only{display:none}}
 .shopgrid .card{min-width:0}.stepper b{white-space:nowrap}.stepper button{padding:2px 12px}
 @media(max-width:640px){.shophead{flex:1 1 100%}}
