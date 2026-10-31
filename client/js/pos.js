@@ -1,5 +1,5 @@
 let customer = null, products = [], cart = [], saleKey = crypto.randomUUID(), shift = null;
-const subtotal = () => cart.reduce((t, l) => t + l.p.price * l.qty, 0);   // previews only; the server recalculates everything
+const subtotal = () => cart.reduce((t, l) => t + l.p.price * l.qty, 0);   //  the server recalculates everything
 const discount = () => { const v = parseFloat($('#disc').value) || 0, s = subtotal(); return Math.min(Math.max($('#dtype').value === 'pct' ? Math.round(s * v / 100) : toCents(v), 0), s); };
 const total = () => subtotal() - discount();
 const inCart = p => cart.find(l => l.p.id === p.id)?.qty || 0;

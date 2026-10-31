@@ -45,7 +45,7 @@ function showReceipt(s) {
   $('#pr', d).onclick = () => window.print();
 }
 
-function pic(p, cls) { // product image, or a coloured initials tile when there is none
+function pic(p, cls) { // product image, or a coloured initials tile kama hakuna picha
   if (p.image) return `<img class="${cls}" src="${esc(p.image)}" alt="${esc(p.name)}">`;
   let h = 0; for (const c of p.name) h = (h * 31 + c.charCodeAt(0)) % 360;
   return `<div class="ph ${cls}" style="background:hsl(${h} 42% 38%)" aria-hidden="true">${esc(p.name.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase())}</div>`;

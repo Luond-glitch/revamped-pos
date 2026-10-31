@@ -1,5 +1,4 @@
-/* API layer. Pages only call API.*  — flip USE_MOCK to false when the Express backend exists.
-   Money is integer cents in the UI/mock; map to/from NUMERIC strings in the real branch below. */
+
 const CONFIG = { USE_MOCK: true, BASE: '/api/v1', BRANCH_ID: 'branch-1', REGISTER_ID: 'register-1' };
 
 const RealAPI = {
@@ -76,7 +75,7 @@ const MockAPI = (() => {
       if (p.id) Object.assign(d.products.find(x => x.id === p.id), p); else d.products.push({ ...p, id: uid(), stock: 0, trackStock: true });
       save(d); return wait(p);
     },
-    async adjustStock({ productId, delta, type, reason }) { // balance + movement change together, like the future DB transaction
+    async adjustStock({ productId, delta, type, reason }) { 
       const d = load(), p = d.products.find(x => x.id === productId);
       if (!p || !delta) return fail('Choose a product and a quantity.'); if (p.stock + delta < 0) return fail('Stock cannot go below zero.');
       p.stock += delta; d.movements.unshift({ id: uid(), productId, name: p.name, type, delta, reason, by: me().name, at: new Date().toISOString() });
@@ -87,7 +86,7 @@ const MockAPI = (() => {
       const d = load(); if (d.idem[idempotencyKey]) return wait(d.sales.find(s => s.id === d.idem[idempotencyKey]));
       if (!d.shift) return fail('Open a shift before selling.'); if (!items.length) return fail('Cart is empty.');
       const rows = []; let sub = 0;
-      for (const it of items) { // server-side price lookup: never trust browser prices
+      for (const it of items) { 
         const p = d.products.find(x => x.id === it.productId); if (!p) return fail('Product not found.');
         if (p.trackStock && p.stock < it.quantity) return fail('Not enough stock: ' + p.name + ' (' + p.stock + ' left).');
         rows.push({ p, q: it.quantity, lt: p.price * it.quantity }); sub += p.price * it.quantity;
