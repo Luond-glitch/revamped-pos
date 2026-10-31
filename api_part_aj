@@ -1,0 +1,200 @@
+        if not business_id:
+            raise ValidationError({
+                "business_id": "This query parameter is required."
+            })
+
+        membership = Membership.objects.filter(
+            user=request.user,
+            business_id=business_id,
+            is_active=True,
+        ).first()
+
+        if membership is None:
+            raise PermissionDenied(
+                "You do not have access to this business."
+            )
+
+        branches = Branch.objects.filter(
+            business_id=business_id,
+            is_active=True,
+        )
+
+        if membership.role not in ["owner", "admin"]:
+            branches = branches.filter(
+                id__in=membership.staff_assignment.values_list(
+                    "branch_id",
+                    flat=True,
+                )
+            )
+
+        if branch_id:
+            branch = branches.filter(id=branch_id).first()
+
+            if branch is None:
+                raise PermissionDenied(
+                    "You cannot access this branch."
+                )
+
+            branches = branches.filter(id=branch_id)
+
+        sales = Sale.objects.filter(
+            business_id=business_id,
+            branch__in=branches,
+            status="completed",
+        )
+
+        stock = Stock.objects.filter(
+            branch__in=branches,
+            product__business_id=business_id,
+        )
+
+        products = Product.objects.filter(
+            business_id=business_id,
+            is_active=True,
+        )
+
+        purchases = Purchase.objects.filter(
+            business_id=business_id,
+            branch__in=branches,
+        )
+
+        today = timezone.localdate()
+
+        today_sales = sales.filter(created_at__date=today)
+
+        sales_summary = sales.aggregate(
+            total=Sum("total_amount"),
+            count=Count("id"),
+            average=Avg("total_amount"),
+        )
+
+        today_summary = today_sales.aggregate(
+            total=Sum("total_amount"),
+            count=Count("id"),
+        )
+
+        low_stock = stock.filter(
+            quantity__lte=F("reorder_level"),
+            product__is_active=True,
+        ).select_related("product", "branch")
+
+        recent_sales = sales.select_related(
+            "branch", "cashier", "customer"
+        ).order_by("-created_at")[:10]
+
+        recent_sales_data = [
+            {
+                "id": str(sale.id),
+                "receipt_number": sale.receipt_number,
+                "branch": sale.branch.name,
+                "cashier": sale.cashier.get_username(),
+                "customer": (
+                    sale.customer.name if sale.customer else None
+                ),
+                "total": str(sale.total_amount),
+                "created_at": sale.created_at.isoformat(),
+            }
+            for sale in recent_sales
+        ]
+
+        low_stock_data = [
+            {
+                "product_id": str(item.product_id),
+                "product_name": item.product.name,
+                "sku": item.product.sku,
+                "branch": item.branch.name,
+                "quantity": str(item.quantity),
+                "reorder_level": str(item.reorder_level),
+            }
+            for item in low_stock.order_by("quantity")[:10]
+        ]
+
+        top_items = (
+            SaleItem.objects.filter(sale__in=sales)
+            .values("product_id", "product_name")
+            .annotate(
+                quantity_sold=Sum("quantity"),
+                sales_value=Sum("line_total"),
+            )
+            .order_by("-quantity_sold")[:5]
+        )
+
+        top_products_data = [
+            {
+                "product_id": str(item["product_id"]),
+                "product_name": item["product_name"],
+                "quantity_sold": str(item["quantity_sold"] or 0),
+                "sales_value": str(item["sales_value"] or Decimal("0.00")),
+            }
+            for item in top_items
+        ]
+
+        return Response({
+            "business_id": str(business_id),
+            "branch_id": str(branch_id) if branch_id else None,
+            "generated_at": timezone.now().isoformat(),
+
+            "sales": {
+                "total": str(sales_summary["total"] or Decimal("0.00")),
+                "count": sales_summary["count"],
+                "average": str(
+                    sales_summary["average"] or Decimal("0.00")
+                ),
+            },
+
+            "today": {
+                "sales_total": str(
+                    today_summary["total"] or Decimal("0.00")
+                ),
+                "sales_count": today_summary["count"],
+            },
+
+            "inventory": {
+                "active_products": products.count(),
+                "low_stock_count": low_stock.count(),
+                "low_stock_items": low_stock_data,
+            },
+
+            "purchasing": {
+                "draft_purchases": purchases.filter(
+                    status="draft"
+                ).count(),
+            },
+
+            "recent_sales": recent_sales_data,
+            "top_products": top_products_data,
+        })
+
+========== reporting/extra_reports.py ==========
+from decimal import Decimal
+
+from django.db.models import Sum, Count
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.response import Response
+
+from businesses.models import Membership, Branch
+from inventory.models import Product, Stock
+from purchasing.models import Purchase
+
+
+class BaseExtraReportView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_report_context(self, request):
+        business_id = request.query_params.get("business_id")
+
+        if not business_id:
+            raise ValidationError({
+                "business_id": "This field is required."
+            })
+
+        membership = Membership.objects.filter(
+            user=request.user,
+            business_id=business_id,
+            is_active=True,
+        ).first()
+
+        if not membership:
+            raise PermissionDenied(

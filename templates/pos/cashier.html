@@ -1,0 +1,167 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Universal POS | Cashier</title>
+    <link rel="stylesheet" href="{% static 'pos/css/cashier.css' %}">
+    <script src="{% static 'pos/js/cashier.js' %}" defer></script>
+</head>
+<body>
+    <header class="topbar">
+        <div>
+            <p class="eyebrow">UNIVERSAL POS</p>
+            <h1>Point of Sale</h1>
+        </div>
+        <a class="back-link" href="/">Dashboard</a>
+    </header>
+
+    <main class="page">
+        <section class="panel setup-panel">
+            <div class="section-heading">
+                <div>
+                    <h2>Choose your workspace</h2>
+                    <p>Select the business and branch where you are making sales.</p>
+                </div>
+                <span id="workspace-status" class="status-badge">Loading...</span>
+            </div>
+
+            <div class="field-grid">
+                <label>
+                    Business
+                    <select id="business-select">
+                        <option value="">Loading businesses...</option>
+                    </select>
+                </label>
+
+                <label>
+                    Branch
+                    <select id="branch-select" disabled>
+                        <option value="">Choose a business first</option>
+                    </select>
+                </label>
+            </div>
+        </section>
+
+        <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+
+        <div class="pos-layout">
+            <section class="panel products-panel">
+                <div class="section-heading">
+                    <div>
+                        <h2>Products</h2>
+                        <p>Find a product and add it to the sale.</p>
+                    </div>
+                    <span id="product-count" class="muted">0 products</span>
+                </div>
+
+                <label class="search-label">
+                    Search inventory
+                    <input
+                        id="product-search"
+                        type="search"
+                        placeholder="Search by product name, SKU or barcode..."
+                        autocomplete="off"
+                    >
+                </label>
+
+                <div id="products-list" class="products-grid">
+                    <div class="empty-state">
+                        Choose a business and branch to load inventory.
+                    </div>
+                </div>
+            </section>
+
+            <aside class="panel cart-panel">
+                <div class="section-heading">
+                    <div>
+                        <h2>Current sale</h2>
+                        <p id="cart-count">0 items</p>
+                    </div>
+                    <button id="clear-cart" class="text-button" type="button">
+                        Clear
+                    </button>
+                </div>
+
+                <div id="cart-items" class="cart-items">
+                    <div class="empty-state">Your cart is empty.</div>
+                </div>
+
+                <div class="totals">
+                    <div>
+                        <span>Subtotal</span>
+                        <strong id="subtotal">KES 0.00</strong>
+                    </div>
+
+                    <label class="inline-field">
+                        Discount
+                        <input id="discount-amount" type="number" min="0" step="0.01" value="0">
+                    </label>
+
+                    <label class="inline-field">
+                        Tax
+                        <input id="tax-amount" type="number" min="0" step="0.01" value="0">
+                    </label>
+
+                    <div class="grand-total">
+                        <span>Total</span>
+                        <strong id="total">KES 0.00</strong>
+                    </div>
+                </div>
+
+                <div class="payment-fields">
+                    <label>
+                        Payment method
+                        <select id="payment-method">
+                            <option value="cash">Cash</option>
+                            <option value="mobile_money">Mobile money</option>
+                            <option value="card">Card</option>
+                            <option value="bank_transfer">Bank transfer</option>
+                        </select>
+                    </label>
+
+                    <label>
+                        Payment reference
+                        <input
+                            id="payment-reference"
+                            type="text"
+                            maxlength="150"
+                            placeholder="Optional transaction reference"
+                        >
+                    </label>
+
+                    <label>
+                        Sale notes
+                        <textarea id="sale-notes" rows="2" placeholder="Optional notes"></textarea>
+                    </label>
+
+                    <button id="checkout-button" class="primary-button" type="button" disabled>
+                        Complete sale
+                    </button>
+                    <p class="helper-text">
+                        Confirm the payment before recording it. Mobile-money and card
+                        references entered here are not independently verified by this screen.
+                    </p>
+                </div>
+            </aside>
+        </div>
+
+        <section id="receipt-panel" class="panel receipt-panel" hidden>
+            <div class="section-heading">
+                <div>
+                    <h2>Sale recorded</h2>
+                    <p id="receipt-summary"></p>
+                </div>
+                <button id="hide-receipt" class="secondary-button" type="button">
+                    Close
+                </button>
+            </div>
+            <pre id="receipt-content"></pre>
+            <button id="print-receipt" class="primary-button" type="button">
+                Print receipt
+            </button>
+        </section>
+    </main>
+</body>
+</html>

@@ -1,0 +1,19 @@
+from django.shortcuts import render
+from decimal import Decimal
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.shortcuts import get_object_or_404
+from rest_framework import status
+from rest_framework.decorators import api_view,permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+from business.models import Business,Branch,Membership
+from .models import Customer
+from .serializers import CreateSaleSerializer
+from .services import process_sale
+# Create your views here.
+@api_view(["post"])
+@permission_classes([IsAuthenticated])
+def create_sale(request):
+ serializer=CreateSaleSerializer(data=request.data)
+ serializer.is_valid(raise_exception=True)

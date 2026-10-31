@@ -1,0 +1,133 @@
+                "You do not have access to this business."
+            )
+
+        branches = Branch.objects.filter(
+            business_id=business_id,
+            is_active=True,
+        )
+
+        if membership.role not in ["owner", "admin"]:
+            branches = branches.filter(
+                id__in=membership.staff_assignment.values_list(
+                    "branch_id",
+                    flat=True,
+                )
+            )
+
+        branch_id = request.query_params.get("branch_id")
+
+        if branch_id:
+            if not branches.filter(id=branch_id).exists():
+                raise PermissionDenied(
+                    "You do not have access to this branch."
+                )
+
+            branches = branches.filter(id=branch_id)
+
+        return business_id, branches
+
+
+class InventoryReportView(BaseExtraReportView):
+    def get(self, request):
+        business_id, branches = self.get_report_context(request)
+
+        products = Product.objects.filter(
+            business_id=business_id,
+            is_active=True,
+        )
+
+        stocks = Stock.objects.filter(
+            branch__in=branches,
+            product__business_id=business_id,
+            product__is_active=True,
+        ).select_related("product", "branch")
+
+        total_stock_units = Decimal("0")
+        inventory_cost_value = Decimal("0")
+        low_stock_items = []
+
+        for stock in stocks:
+            quantity = stock.quantity or Decimal("0")
+            cost_price = stock.product.cost_price or Decimal("0")
+
+            total_stock_units += quantity
+            inventory_cost_value += quantity * cost_price
+
+            if quantity <= stock.reorder_level:
+                low_stock_items.append({
+                    "branch": str(stock.branch),
+                    "product_id": str(stock.product_id),
+                    "product": stock.product.name,
+                    "sku": stock.product.sku,
+                    "quantity": str(quantity),
+                    "reorder_level": str(stock.reorder_level),
+                })
+
+        return Response({
+            "summary": {
+                "active_products": products.count(),
+                "total_stock_units": str(total_stock_units),
+                "inventory_cost_value": str(
+                    inventory_cost_value.quantize(
+                        Decimal("0.01")
+                    )
+                ),
+                "low_stock_count": len(low_stock_items),
+            },
+            "low_stock_items": low_stock_items,
+        })
+
+
+class PurchasingReportView(BaseExtraReportView):
+    def get(self, request):
+        business_id, branches = self.get_report_context(request)
+
+        purchases = Purchase.objects.filter(
+            business_id=business_id,
+            branch__in=branches,
+        )
+
+        summary = purchases.aggregate(
+            total_purchases=Count("id"),
+            total_purchase_value=Sum("total_amount"),
+        )
+
+        status_summary = list(
+            purchases.values("status").annotate(
+                count=Count("id"),
+                amount=Sum("total_amount"),
+            ).order_by("status")
+        )
+
+        recent_purchases = purchases.select_related(
+            "supplier", "branch"
+        ).order_by("-created_at")[:10]
+
+        return Response({
+            "summary": {
+                "total_purchases": summary["total_purchases"] or 0,
+                "total_purchase_value": str(
+                    summary["total_purchase_value"] or Decimal("0.00")
+                ),
+            },
+            "by_status": [
+                {
+                    "status": item["status"],
+                    "count": item["count"],
+                    "amount": str(item["amount"] or Decimal("0.00")),
+                }
+                for item in status_summary
+            ],
+            "recent_purchases": [
+                {
+                    "id": str(purchase.id),
+                    "reference_number": purchase.reference_number,
+                    "supplier": purchase.supplier.name,
+                    "branch": str(purchase.branch),
+                    "status": purchase.status,
+                    "total_amount": str(purchase.total_amount),
+                    "created_at": purchase.created_at,
+                }
+                for purchase in recent_purchases
+            ],
+        })

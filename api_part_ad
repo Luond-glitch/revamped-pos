@@ -1,0 +1,200 @@
+            )
+
+        assignments = membership.staff_assignment.all()
+
+        if assignments.exists() and not assignments.filter(
+            branch=data["branch"]
+        ).exists():
+            return Response(
+                {"detail": "You are not assigned to this branch."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            sale = process_sale(
+                business=data["business"],
+                branch=data["branch"],
+                cashier=request.user,
+                items=[
+                    {
+                        "product_id": str(item["product_id"]),
+                        "quantity": item["quantity"],
+                    }
+                    for item in data["items"]
+                ],
+                customer_id=data.get("customer_id") or None,
+                discount_amount=data["discount_amount"],
+                tax_amount=data["tax_amount"],
+                notes=data.get("notes", ""),
+                checkout_key=data["checkout_key"],
+            )
+        except DjangoValidationError as exc:
+            return Response(
+                {"detail": exc.messages},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            {
+                "id": str(sale.pk),
+                "sale_id": str(sale.pk),
+                "receipt_number": sale.receipt_number,
+                "status": sale.status,
+                "subtotal": str(sale.subtotal),
+                "discount_amount": str(sale.discount_amount),
+                "tax_amount": str(sale.tax_amount),
+                "total_amount": str(sale.total_amount),
+                "checkout_key": str(sale.checkout_key),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+========== sales/serializers.py ==========
+from decimal import Decimal
+from rest_framework import serializers
+
+from businesses.models import Business, Branch
+from inventory.models import Product
+
+
+class SaleItemInputSerializer(serializers.Serializer):
+    product_id = serializers.UUIDField()
+    quantity = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        min_value=Decimal("0.001"),
+    )
+
+
+class CreateSaleSerializer(serializers.Serializer):
+    checkout_key = serializers.UUIDField()
+
+    business_id = serializers.UUIDField()
+    branch_id = serializers.UUIDField()
+
+    customer_id = serializers.CharField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+    )
+
+    discount_amount = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        min_value=Decimal("0.00"),
+        default=0,
+    )
+
+    tax_amount = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        min_value=Decimal("0.00"),
+        default=0,
+    )
+
+    notes = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+    )
+
+    items = SaleItemInputSerializer(many=True, allow_empty=False)
+
+    def validate(self, attrs):
+        business = Business.objects.filter(
+            pk=attrs["business_id"],
+            is_active=True,
+        ).first()
+
+        if business is None:
+            raise serializers.ValidationError({
+                "business_id": "The selected business is unavailable."
+            })
+
+        branch = Branch.objects.filter(
+            pk=attrs["branch_id"],
+            business=business,
+            is_active=True,
+        ).first()
+
+        if branch is None:
+            raise serializers.ValidationError({
+                "branch_id": "The selected branch is unavailable."
+            })
+
+        product_ids = [item["product_id"] for item in attrs["items"]]
+
+        if len(product_ids) != len(set(product_ids)):
+            raise serializers.ValidationError({
+                "items": "Each product must appear only once."
+            })
+
+        products = Product.objects.filter(
+            pk__in=product_ids,
+            business=business,
+            is_active=True,
+        )
+
+        products_by_id = {product.pk: product for product in products}
+
+        if len(products_by_id) != len(product_ids):
+            raise serializers.ValidationError({
+                "items": "One or more products are unavailable."
+            })
+
+        attrs["business"] = business
+        attrs["branch"] = branch
+        attrs["products"] = products_by_id
+
+        return attrs
+
+========== payments/urls.py ==========
+from django.urls import path
+
+from .views import PaymentCreateView
+
+urlpatterns = [
+    path("record/", PaymentCreateView.as_view(), name="record-payment"),
+]
+
+========== payments/views.py ==========
+from django.core.exceptions import ValidationError as DjangoValidationError
+
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from businesses.models import Membership
+from sales.models import Sale
+
+from .serializers import PaymentCreateSerializer
+from .services import record_payment
+
+
+PAYMENT_ROLES = {"owner", "admin", "manager", "cashier"}
+
+
+class PaymentCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = PaymentCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        sale = Sale.objects.filter(
+            pk=data["sale_id"],
+            business__is_active=True,
+        ).first()
+
+        if sale is None:
+            return Response(
+                {"detail": "Sale not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        membership = Membership.objects.filter(
+            user=request.user,
+            business=sale.business,
+            is_active=True,

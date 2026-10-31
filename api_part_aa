@@ -1,0 +1,200 @@
+]633;E;for file in config/urls.py businesses/urls.py businesses/views.py businesses/serializers.py inventory/urls.py inventory/views.py inventory/serializers.py sales/urls.py sales/views.py sales/serializers.py payments/urls.py payments/views.py payments/serializers.py purchasing/urls.py purchasing/views.py purchasing/serializers.py reporting/urls.py reporting/views.py reporting/serializers.py reporting/dashboard_api.py reporting/extra_reports.py;37d2e92c-c915-4a04-a2b8-34e1d1ddf6b7]633;C
+========== businesses/views.py ==========
+from django.shortcuts import render
+
+# Create your views here.
+
+========== inventory/urls.py ==========
+from rest_framework.routers import DefaultRouter
+
+from .views import (
+    CategoryViewSet,
+    ProductViewSet,
+    StockViewSet,
+    StockMovementViewSet,
+)
+
+router = DefaultRouter()
+router.register("categories", CategoryViewSet, basename="category")
+router.register("products", ProductViewSet, basename="product")
+router.register("stock", StockViewSet, basename="stock")
+router.register(
+    "stock-movements",
+    StockMovementViewSet,
+    basename="stock-movement",
+)
+
+urlpatterns = router.urls
+
+========== inventory/views.py ==========
+from django.core.exceptions import ValidationError
+from django.shortcuts import get_object_or_404
+
+from rest_framework import status, viewsets
+from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied, ValidationError as APIValidationError
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+from businesses.models import Membership
+from .models import Category, Product, Stock, StockMovement
+from .serializers import (
+    CategorySerializer,
+    ProductSerializer,
+    StockSerializer,
+    StockMovementSerializer,
+)
+from .services import record_stock_movement
+
+
+INVENTORY_MANAGER_ROLES = {
+    "owner",
+    "admin",
+    "manager",
+    "stock_manager",
+}
+
+
+class BusinessScopedViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated]
+
+    def active_memberships(self):
+        return Membership.objects.filter(
+            user=self.request.user,
+            is_active=True,
+            business__is_active=True,
+        )
+
+    def get_business_ids(self):
+        return self.active_memberships().values_list(
+            "business_id",
+            flat=True,
+        )
+
+    def require_inventory_manager(self, business_id):
+        allowed = self.active_memberships().filter(
+            business_id=business_id,
+            role__in=INVENTORY_MANAGER_ROLES,
+        ).exists()
+
+        if not allowed:
+            raise PermissionDenied(
+                "You do not have permission to manage this business's inventory."
+            )
+
+
+class CategoryViewSet(BusinessScopedViewSet):
+    serializer_class = CategorySerializer
+
+    def get_queryset(self):
+        queryset = Category.objects.filter(
+            business_id__in=self.get_business_ids()
+        ).select_related("business")
+
+        business_id = self.request.query_params.get("business_id")
+        if business_id:
+            queryset = queryset.filter(business_id=business_id)
+
+        return queryset
+
+    def perform_create(self, serializer):
+        business_id = serializer.validated_data["business"].pk
+        self.require_inventory_manager(business_id)
+        serializer.save()
+
+    def perform_update(self, serializer):
+        business_id = serializer.instance.business_id
+        self.require_inventory_manager(business_id)
+
+        new_business = serializer.validated_data.get(
+            "business",
+            serializer.instance.business,
+        )
+        self.require_inventory_manager(new_business.pk)
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        self.require_inventory_manager(instance.business_id)
+        instance.is_active = False
+        instance.save(update_fields=["is_active"])
+
+
+class ProductViewSet(BusinessScopedViewSet):
+    serializer_class = ProductSerializer
+
+    def get_queryset(self):
+        queryset = Product.objects.filter(
+            business_id__in=self.get_business_ids()
+        ).select_related("business", "category")
+
+        business_id = self.request.query_params.get("business_id")
+        if business_id:
+            queryset = queryset.filter(business_id=business_id)
+
+        return queryset
+
+    def perform_create(self, serializer):
+        business_id = serializer.validated_data["business"].pk
+        self.require_inventory_manager(business_id)
+        serializer.save()
+
+    def perform_update(self, serializer):
+        business_id = serializer.instance.business_id
+        self.require_inventory_manager(business_id)
+
+        new_business = serializer.validated_data.get(
+            "business",
+            serializer.instance.business,
+        )
+        self.require_inventory_manager(new_business.pk)
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        self.require_inventory_manager(instance.business_id)
+        instance.is_active = False
+        instance.save(update_fields=["is_active"])
+
+
+class StockViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = StockSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        memberships = Membership.objects.filter(
+            user=self.request.user,
+            is_active=True,
+            business__is_active=True,
+        )
+
+        queryset = Stock.objects.filter(
+            branch__business__in=memberships.values("business_id"),
+            branch__is_active=True,
+        ).select_related(
+            "branch",
+            "branch__business",
+            "product",
+            "product__category",
+        )
+
+        branch_id = self.request.query_params.get("branch_id")
+        product_id = self.request.query_params.get("product_id")
+
+        if branch_id:
+            queryset = queryset.filter(branch_id=branch_id)
+
+        if product_id:
+            queryset = queryset.filter(product_id=product_id)
+
+        return queryset
+
+    @action(detail=True, methods=["post"], url_path="movements")
+    def movements(self, request, pk=None):
+        stock = self.get_object()
+
+        can_manage = Membership.objects.filter(
+            user=request.user,
+            business_id=stock.branch.business_id,
+            is_active=True,
+            business__is_active=True,
+            role__in=INVENTORY_MANAGER_ROLES,
+        ).exists()

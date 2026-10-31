@@ -1,11 +1,9 @@
 from django.http import JsonResponse
 from django.utils import timezone
+from django.contrib.auth.decorators import login_required
+from django.shortcuts import render
 
 # Create your views here.
-def health_check(request):
- return JsonResponse({
- "status":"success",
- "message":"universal POS backend is running",
- "application":"universal POS management system",
-  "timestamp":timezone.now().isoformat(),
-  })
+@login_required
+def dashboard(request):
+    return render(request, "dashboard.html")

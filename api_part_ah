@@ -1,0 +1,200 @@
+            "business_id": "Business not found or inactive."
+        })
+
+    membership = Membership.objects.filter(
+        user=request.user,
+        business=business,
+        is_active=True,
+    ).first()
+
+    if membership is None:
+        raise PermissionDenied(
+            "You do not have access to this business."
+        )
+
+    branch = None
+
+    if branch_id:
+        branch = Branch.objects.filter(
+            id=branch_id,
+            business=business,
+            is_active=True,
+        ).first()
+
+        if branch is None:
+            raise ValidationError({
+                "branch_id": "Invalid branch for this business."
+            })
+
+        if membership.role not in ["owner", "admin"]:
+            if not membership.staff_assignment.filter(
+                branch=branch
+            ).exists():
+                raise PermissionDenied(
+                    "You are not assigned to this branch."
+                )
+
+    return business, branch, membership
+
+
+def get_sales_queryset(business, branch=None):
+    """
+    Return completed sales belonging to the selected
+    business and, optionally, branch.
+    """
+    sales = Sale.objects.filter(
+        business=business,
+        status="completed",
+    )
+
+    if branch is not None:
+        sales = sales.filter(branch=branch)
+
+    return sales
+
+
+def get_stock_queryset(business, branch=None):
+    """
+    Return stock belonging to the selected business.
+    """
+    stock = Stock.objects.filter(
+        branch__business=business,
+        product__is_active=True,
+    ).select_related("product", "branch")
+
+    if branch is not None:
+        stock = stock.filter(branch=branch)
+
+    return stock
+
+
+def decimal_string(value):
+    return str(value if value is not None else Decimal("0.00"))
+
+
+class DashboardReportView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        business, branch, membership = get_report_context(request)
+
+        sales = get_sales_queryset(business, branch)
+        stock = get_stock_queryset(business, branch)
+
+        today = timezone.localdate()
+
+        sales_today = sales.filter(
+            created_at__date=today
+        )
+
+        sales_summary = sales.aggregate(
+            total_sales=Sum("total_amount"),
+            sales_count=Count("id"),
+            average_sale=Avg("total_amount"),
+        )
+
+                # Calculate completed payments for the selected business and branch.
+        payments = Payment.objects.filter(
+            business=business,
+            status="completed",
+            sale__status="completed",
+        )
+
+        if branch is not None:
+            payments = payments.filter(sale__branch=branch)
+
+        payment_summary = payments.aggregate(
+            money_received=Sum("amount"),
+            payment_count=Count("id"),
+        )
+        
+        today_summary = sales_today.aggregate(
+            total_sales=Sum("total_amount"),
+            sales_count=Count("id"),
+        )
+
+        low_stock = stock.filter(
+            quantity__lte=F("reorder_level")
+        )
+
+        low_stock_items = [
+            {
+                "product_id": str(item.product_id),
+                "product_name": item.product.name,
+                "sku": item.product.sku,
+                "branch": item.branch.name,
+                "quantity": str(item.quantity),
+                "reorder_level": str(item.reorder_level),
+            }
+            for item in low_stock.order_by("quantity")[:20]
+        ]
+
+        total_products = Product.objects.filter(
+            business=business,
+            is_active=True,
+        ).count()
+
+        pending_purchases = Purchase.objects.filter(
+            business=business,
+            status="draft",
+        ).count()
+
+        recent_sales = sales.select_related(
+            "branch", "cashier", "customer"
+        ).order_by("-created_at")[:10]
+
+        recent_sales_data = [
+            {
+                "id": str(sale.id),
+                "receipt_number": sale.receipt_number,
+                "branch": sale.branch.name,
+                "cashier": (
+                    sale.cashier.username
+                    if sale.cashier else None
+                ),
+                "customer": (
+                    sale.customer.name
+                    if sale.customer else None
+                ),
+                "total_amount": str(sale.total_amount),
+                "created_at": sale.created_at.isoformat(),
+            }
+            for sale in recent_sales
+        ]
+
+        top_products = SaleItem.objects.filter(
+            sale__in=sales
+        ).values(
+            "product_id",
+            "product_name",
+            "sku",
+        ).annotate(
+            quantity_sold=Sum("quantity"),
+            revenue=Sum("line_total"),
+        ).order_by("-quantity_sold")[:5]
+
+        top_products_data = [
+            {
+                "product_id": str(item["product_id"]),
+                "product_name": item["product_name"],
+                "sku": item["sku"],
+                "quantity_sold": str(item["quantity_sold"]),
+                "revenue": str(item["revenue"] or Decimal("0.00")),
+            }
+            for item in top_products
+        ]
+
+        return Response({
+            "business_id": str(business.id),
+            "business_name": business.name,
+            "branch_id": str(branch.id) if branch else None,
+            "branch_name": branch.name if branch else "All branches",
+            "currency": business.currency,
+
+            "sales": {
+                "total_sales": decimal_string(
+                    sales_summary["total_sales"]
+                ),
+                "sales_count": sales_summary["sales_count"],
+                "average_sale": decimal_string(
+                    sales_summary["average_sale"]

@@ -15,7 +15,7 @@ class Category(models.Model):
   ordering=["name"]
   constraints=[models.UniqueConstraint(fields=["business","name"],name="unique_category_name_per_business")]
   
-  def __str__(self):
+ def __str__(self):
    return f"{self.business.name} - {self.name}"
 
 class Product(models.Model):
@@ -47,7 +47,7 @@ class Stock(models.Model):
  
  class Meta:
   constraints=[models.UniqueConstraint(fields=["branch","product"],name="unique_produt_stock_per_branch")]
-  def __str__(self):
+ def __str__(self):
    return f"{self.product.name} - {self.branch.name}"
 
 class StockMovement(models.Model):

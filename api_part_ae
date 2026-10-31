@@ -1,0 +1,200 @@
+            role__in=PAYMENT_ROLES,
+        ).first()
+
+        if membership is None:
+            return Response(
+                {"detail": "You cannot record payments for this business."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        assignments = membership.staff_assignment.all()
+
+        if assignments.exists() and not assignments.filter(
+            branch=sale.branch
+        ).exists():
+            return Response(
+                {"detail": "You are not assigned to this branch."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            payment = record_payment(
+                sale_id=sale.pk,
+                business=sale.business,
+                received_by=request.user,
+                amount=data["amount"],
+                payment_method=data["payment_method"],
+                transaction_reference=data.get(
+                    "transaction_reference", ""
+                ),
+                notes=data.get("notes", ""),
+                idempotency_key=data.get("idempotency_key"),
+            )
+        except DjangoValidationError as exc:
+            return Response(
+                {"detail": exc.messages},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            {
+                "id": str(payment.pk),
+                "sale_id": str(payment.sale_id),
+                "amount": str(payment.amount),
+                "payment_method": payment.payment_method,
+                "status": payment.status,
+                "transaction_reference": payment.transaction_reference,
+                "idempotency_key": (
+                    str(payment.idempotency_key)
+                    if payment.idempotency_key else None
+                ),
+            },
+            status=(
+                status.HTTP_200_OK
+                if data.get("idempotency_key")
+                else status.HTTP_201_CREATED
+            ),
+        )
+
+========== payments/serializers.py ==========
+from decimal import Decimal
+
+from rest_framework import serializers
+
+
+class PaymentCreateSerializer(serializers.Serializer):
+    sale_id = serializers.UUIDField()
+
+    amount = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        min_value=Decimal("0.01"),
+    )
+
+    payment_method = serializers.ChoiceField(
+        choices=[
+            ("cash", "Cash"),
+            ("mobile_money", "Mobile Money"),
+            ("card", "Card"),
+            ("bank_transfer", "Bank Transfer"),
+        ]
+    )
+
+    transaction_reference = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=150,
+    )
+
+    notes = serializers.CharField(
+        required=False,
+        allow_blank=True,
+    )
+
+    idempotency_key = serializers.UUIDField(
+        required=False,
+        allow_null=True,
+    )
+
+========== purchasing/urls.py ==========
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+
+from .views import (
+    SupplierViewSet,
+    PurchaseViewSet,
+    CreatePurchaseView,
+    ReceivePurchaseView,
+)
+
+router = DefaultRouter()
+
+router.register(
+    "suppliers",
+    SupplierViewSet,
+    basename="supplier",
+)
+
+router.register(
+    "purchases",
+    PurchaseViewSet,
+    basename="purchase",
+)
+
+urlpatterns = [
+    path("", include(router.urls)),
+    path(
+        "purchases/create/",
+        CreatePurchaseView.as_view(),
+        name="create-purchase",
+    ),
+    path(
+        "purchases/<uuid:purchase_id>/receive/",
+        ReceivePurchaseView.as_view(),
+        name="receive-purchase",
+    ),
+]
+
+========== purchasing/views.py ==========
+from decimal import Decimal
+
+from django.db import transaction
+from django.db.models import Sum
+from django.utils import timezone
+
+from rest_framework import status, viewsets
+from rest_framework.decorators import action
+from rest_framework.exceptions import (
+    PermissionDenied,
+    ValidationError,
+)
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from businesses.models import Business, Branch, Membership
+from inventory.models import Product, Stock, StockMovement
+
+from .models import Supplier, Purchase, PurchaseItem
+from .serializers import (
+    SupplierSerializer,
+    PurchaseSerializer,
+    CreatePurchaseSerializer,
+)
+
+
+def get_membership(user, business_id):
+    membership = Membership.objects.filter(
+        user=user,
+        business_id=business_id,
+        is_active=True,
+    ).first()
+
+    if membership is None:
+        raise PermissionDenied(
+            "You do not have access to this business."
+        )
+
+    return membership
+
+
+def check_branch_access(membership, branch):
+    if branch.business_id != membership.business_id:
+        raise PermissionDenied(
+            "This branch does not belong to your business."
+        )
+
+    if membership.role in ["owner", "admin"]:
+        return
+
+    if not membership.branch_assignments.filter(
+        branch=branch
+    ).exists():
+        raise PermissionDenied(
+            "You are not assigned to this branch."
+        )
+
+
+class SupplierViewSet(viewsets.ModelViewSet):
+    serializer_class = SupplierSerializer
+    permission_classes = [IsAuthenticated]

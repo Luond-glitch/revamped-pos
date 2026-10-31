@@ -1,0 +1,200 @@
+class ReceivePurchaseView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, purchase_id):
+        with transaction.atomic():
+            purchase = Purchase.objects.select_for_update().filter(
+                id=purchase_id
+            ).first()
+
+            if purchase is None:
+                return Response(
+                    {"error": "Purchase not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+            membership = get_membership(
+                request.user,
+                purchase.business_id,
+            )
+
+            if membership.role not in [
+                "owner", "admin", "manager", "stock_manager"
+            ]:
+                raise PermissionDenied(
+                    "You cannot receive purchases."
+                )
+
+            check_branch_access(membership, purchase.branch)
+
+            if purchase.status != "draft":
+                raise ValidationError(
+                    "Only draft purchases can be received."
+                )
+
+            purchase_items = list(
+                purchase.items.select_related("product")
+            )
+
+            if not purchase_items:
+                raise ValidationError(
+                    "Cannot receive a purchase without items."
+                )
+
+            for item in purchase_items:
+                if item.product.business_id != purchase.business_id:
+                    raise ValidationError(
+                        "A purchase contains a product "
+                        "from another business."
+                    )
+
+                stock, created = Stock.objects.get_or_create(
+                    branch=purchase.branch,
+                    product=item.product,
+                    defaults={"quantity": Decimal("0.000")},
+                )
+
+                stock = Stock.objects.select_for_update().get(
+                    pk=stock.pk
+                )
+
+                stock.quantity += item.quantity
+                stock.save(update_fields=["quantity", "updated_at"])
+
+                StockMovement.objects.create(
+                    stock=stock,
+                    movement_type="receipt",
+                    quantity_change=item.quantity,
+                    reference=(
+                        purchase.reference_number
+                        or str(purchase.id)
+                    ),
+                    notes="Stock received from purchase.",
+                )
+
+            purchase.status = "received"
+            purchase.received_at = timezone.now()
+            purchase.save(
+                update_fields=["status", "received_at"]
+            )
+
+        return Response({
+            "message": "Purchase received and stock updated.",
+            "purchase_id": str(purchase.id),
+            "status": purchase.status,
+            "received_at": purchase.received_at.isoformat(),
+        })
+
+========== purchasing/serializers.py ==========
+from rest_framework import serializers
+
+from .models import Supplier, Purchase, PurchaseItem
+
+
+class SupplierSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Supplier
+        fields = "__all__"
+        read_only_fields = ["id"]
+
+
+class PurchaseItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PurchaseItem
+        fields = "__all__"
+        read_only_fields = ["id", "purchase"]
+
+
+class PurchaseSerializer(serializers.ModelSerializer):
+    items = PurchaseItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Purchase
+        fields = "__all__"
+        read_only_fields = ["id"]
+
+
+class CreatePurchaseSerializer(serializers.ModelSerializer):
+    items = PurchaseItemSerializer(
+        many=True,
+        write_only=True,
+    )
+
+    class Meta:
+        model = Purchase
+        fields = [
+            "id",
+            "business",
+            "branch",
+            "supplier",
+            "reference_number",
+            "notes",
+            "items",
+        ]
+        read_only_fields = ["id"]
+
+    def validate_items(self, items):
+        if not items:
+            raise serializers.ValidationError(
+                "Provide at least one purchase item."
+            )
+        return items
+
+
+========== reporting/urls.py ==========
+from django.urls import path
+
+from .dashboard_api import POSDashboardView
+from .views import (
+    DashboardReportView,
+    SalesReportView,
+    InventoryReportView,
+    PurchasingReportView,
+)
+
+urlpatterns = [
+    path("dashboard/", DashboardReportView.as_view(), name="dashboard-report"),
+    path("pos-dashboard/", POSDashboardView.as_view(), name="pos-dashboard"),
+    path("sales/", SalesReportView.as_view(), name="sales-report"),
+    path("inventory/", InventoryReportView.as_view(), name="inventory-report"),
+    path("purchasing/", PurchasingReportView.as_view(), name="purchasing-report"),
+]
+
+========== reporting/views.py ==========
+from datetime import timedelta
+from decimal import Decimal
+from payments.models import Payment
+from django.db.models import Sum, Count, Avg, F, Q
+from django.utils import timezone
+
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.exceptions import ValidationError, PermissionDenied
+
+from businesses.models import Business, Membership, Branch
+from sales.models import Sale, SaleItem
+from inventory.models import Product, Stock
+from purchasing.models import Purchase
+
+
+def get_report_context(request):
+    """
+    Validate business access and return the permitted
+    business, branch, and membership.
+    """
+    business_id = request.query_params.get("business_id")
+    branch_id = request.query_params.get("branch_id")
+
+    if not business_id:
+        raise ValidationError({
+            "business_id": "This query parameter is required."
+        })
+
+    business = Business.objects.filter(
+        id=business_id,
+        is_active=True,
+    ).first()
+
+    if business is None:
+        raise ValidationError({

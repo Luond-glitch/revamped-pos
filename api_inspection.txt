@@ -1,0 +1,2133 @@
+]633;E;for file in config/urls.py businesses/urls.py businesses/views.py businesses/serializers.py inventory/urls.py inventory/views.py inventory/serializers.py sales/urls.py sales/views.py sales/serializers.py payments/urls.py payments/views.py payments/serializers.py purchasing/urls.py purchasing/views.py purchasing/serializers.py reporting/urls.py reporting/views.py reporting/serializers.py reporting/dashboard_api.py reporting/extra_reports.py;37d2e92c-c915-4a04-a2b8-34e1d1ddf6b7]633;C
+========== businesses/views.py ==========
+from django.shortcuts import render
+
+# Create your views here.
+
+========== inventory/urls.py ==========
+from rest_framework.routers import DefaultRouter
+
+from .views import (
+    CategoryViewSet,
+    ProductViewSet,
+    StockViewSet,
+    StockMovementViewSet,
+)
+
+router = DefaultRouter()
+router.register("categories", CategoryViewSet, basename="category")
+router.register("products", ProductViewSet, basename="product")
+router.register("stock", StockViewSet, basename="stock")
+router.register(
+    "stock-movements",
+    StockMovementViewSet,
+    basename="stock-movement",
+)
+
+urlpatterns = router.urls
+
+========== inventory/views.py ==========
+from django.core.exceptions import ValidationError
+from django.shortcuts import get_object_or_404
+
+from rest_framework import status, viewsets
+from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied, ValidationError as APIValidationError
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+from businesses.models import Membership
+from .models import Category, Product, Stock, StockMovement
+from .serializers import (
+    CategorySerializer,
+    ProductSerializer,
+    StockSerializer,
+    StockMovementSerializer,
+)
+from .services import record_stock_movement
+
+
+INVENTORY_MANAGER_ROLES = {
+    "owner",
+    "admin",
+    "manager",
+    "stock_manager",
+}
+
+
+class BusinessScopedViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated]
+
+    def active_memberships(self):
+        return Membership.objects.filter(
+            user=self.request.user,
+            is_active=True,
+            business__is_active=True,
+        )
+
+    def get_business_ids(self):
+        return self.active_memberships().values_list(
+            "business_id",
+            flat=True,
+        )
+
+    def require_inventory_manager(self, business_id):
+        allowed = self.active_memberships().filter(
+            business_id=business_id,
+            role__in=INVENTORY_MANAGER_ROLES,
+        ).exists()
+
+        if not allowed:
+            raise PermissionDenied(
+                "You do not have permission to manage this business's inventory."
+            )
+
+
+class CategoryViewSet(BusinessScopedViewSet):
+    serializer_class = CategorySerializer
+
+    def get_queryset(self):
+        queryset = Category.objects.filter(
+            business_id__in=self.get_business_ids()
+        ).select_related("business")
+
+        business_id = self.request.query_params.get("business_id")
+        if business_id:
+            queryset = queryset.filter(business_id=business_id)
+
+        return queryset
+
+    def perform_create(self, serializer):
+        business_id = serializer.validated_data["business"].pk
+        self.require_inventory_manager(business_id)
+        serializer.save()
+
+    def perform_update(self, serializer):
+        business_id = serializer.instance.business_id
+        self.require_inventory_manager(business_id)
+
+        new_business = serializer.validated_data.get(
+            "business",
+            serializer.instance.business,
+        )
+        self.require_inventory_manager(new_business.pk)
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        self.require_inventory_manager(instance.business_id)
+        instance.is_active = False
+        instance.save(update_fields=["is_active"])
+
+
+class ProductViewSet(BusinessScopedViewSet):
+    serializer_class = ProductSerializer
+
+    def get_queryset(self):
+        queryset = Product.objects.filter(
+            business_id__in=self.get_business_ids()
+        ).select_related("business", "category")
+
+        business_id = self.request.query_params.get("business_id")
+        if business_id:
+            queryset = queryset.filter(business_id=business_id)
+
+        return queryset
+
+    def perform_create(self, serializer):
+        business_id = serializer.validated_data["business"].pk
+        self.require_inventory_manager(business_id)
+        serializer.save()
+
+    def perform_update(self, serializer):
+        business_id = serializer.instance.business_id
+        self.require_inventory_manager(business_id)
+
+        new_business = serializer.validated_data.get(
+            "business",
+            serializer.instance.business,
+        )
+        self.require_inventory_manager(new_business.pk)
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        self.require_inventory_manager(instance.business_id)
+        instance.is_active = False
+        instance.save(update_fields=["is_active"])
+
+
+class StockViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = StockSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        memberships = Membership.objects.filter(
+            user=self.request.user,
+            is_active=True,
+            business__is_active=True,
+        )
+
+        queryset = Stock.objects.filter(
+            branch__business__in=memberships.values("business_id"),
+            branch__is_active=True,
+        ).select_related(
+            "branch",
+            "branch__business",
+            "product",
+            "product__category",
+        )
+
+        branch_id = self.request.query_params.get("branch_id")
+        product_id = self.request.query_params.get("product_id")
+
+        if branch_id:
+            queryset = queryset.filter(branch_id=branch_id)
+
+        if product_id:
+            queryset = queryset.filter(product_id=product_id)
+
+        return queryset
+
+    @action(detail=True, methods=["post"], url_path="movements")
+    def movements(self, request, pk=None):
+        stock = self.get_object()
+
+        can_manage = Membership.objects.filter(
+            user=request.user,
+            business_id=stock.branch.business_id,
+            is_active=True,
+            business__is_active=True,
+            role__in=INVENTORY_MANAGER_ROLES,
+        ).exists()
+
+        if not can_manage:
+            raise PermissionDenied(
+                "You do not have permission to change this stock."
+            )
+
+        movement_type = request.data.get("movement_type")
+        quantity_change = request.data.get("quantity_change")
+
+        if movement_type is None or quantity_change is None:
+            raise APIValidationError({
+                "detail": "movement_type and quantity_change are required."
+            })
+
+        try:
+            updated_stock, movement = record_stock_movement(
+                stock_id=stock.pk,
+                movement_type=movement_type,
+                quantity_change=quantity_change,
+                reference=request.data.get("reference", ""),
+                notes=request.data.get("notes", ""),
+            )
+        except Stock.DoesNotExist:
+            from rest_framework.exceptions import NotFound
+            raise NotFound("Stock record not found.")
+        except ValidationError as exc:
+            raise APIValidationError({
+                "detail": exc.messages,
+            })
+
+        return Response(
+            {
+                "stock": StockSerializer(
+                    updated_stock,
+                    context={"request": request},
+                ).data,
+                "movement": StockMovementSerializer(
+                    movement,
+                    context={"request": request},
+                ).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class StockMovementViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = StockMovementSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        business_ids = Membership.objects.filter(
+            user=self.request.user,
+            is_active=True,
+            business__is_active=True,
+        ).values_list("business_id", flat=True)
+
+        queryset = StockMovement.objects.filter(
+            stock__branch__business_id__in=business_ids,
+        ).select_related(
+            "stock",
+            "stock__product",
+            "stock__branch",
+            "stock__branch__business",
+        )
+
+        stock_id = self.request.query_params.get("stock_id")
+        movement_type = self.request.query_params.get("movement_type")
+
+        if stock_id:
+            queryset = queryset.filter(stock_id=stock_id)
+
+        if movement_type:
+            queryset = queryset.filter(movement_type=movement_type)
+
+        return queryset
+
+========== inventory/serializers.py ==========
+from rest_framework import serializers
+
+from .models import Product, Category, Stock, StockMovement
+
+
+class CategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Category
+        fields = [
+            "id",
+            "business",
+            "name",
+            "description",
+            "is_active",
+            "created_at",
+        ]
+        read_only_fields = ["id", "created_at"]
+
+    def validate(self, attrs):
+        business = attrs.get(
+            "business",
+            getattr(self.instance, "business", None),
+        )
+        name = attrs.get(
+            "name",
+            getattr(self.instance, "name", None),
+        )
+
+        if business and name:
+            existing = Category.objects.filter(
+                business=business,
+                name=name,
+            )
+
+            if self.instance:
+                existing = existing.exclude(pk=self.instance.pk)
+
+            if existing.exists():
+                raise serializers.ValidationError({
+                    "name": (
+                        "A category with this name already exists "
+                        "in this business."
+                    )
+                })
+
+        return attrs
+
+
+class ProductSerializer(serializers.ModelSerializer):
+    category_name = serializers.CharField(
+        source="category.name",
+        read_only=True,
+    )
+
+    class Meta:
+        model = Product
+        fields = [
+            "id",
+            "business",
+            "category",
+            "category_name",
+            "name",
+            "sku",
+            "barcode",
+            "description",
+            "cost_price",
+            "selling_price",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+    def validate(self, attrs):
+        business = attrs.get(
+            "business",
+            getattr(self.instance, "business", None),
+        )
+        category = attrs.get(
+            "category",
+            getattr(self.instance, "category", None),
+        )
+        sku = attrs.get(
+            "sku",
+            getattr(self.instance, "sku", None),
+        )
+
+        if business and category and category.business_id != business.id:
+            raise serializers.ValidationError({
+                "category": (
+                    "The selected category must belong to "
+                    "the selected business."
+                )
+            })
+
+        if business and sku:
+            existing = Product.objects.filter(
+                business=business,
+                sku=sku,
+            )
+
+            if self.instance:
+                existing = existing.exclude(pk=self.instance.pk)
+
+            if existing.exists():
+                raise serializers.ValidationError({
+                    "sku": (
+                        "A product with this SKU already exists "
+                        "in this business."
+                    )
+                })
+
+        return attrs
+
+
+class StockSerializer(serializers.ModelSerializer):
+    product_name = serializers.CharField(
+        source="product.name",
+        read_only=True,
+    )
+    branch_name = serializers.CharField(
+        source="branch.name",
+        read_only=True,
+    )
+
+    class Meta:
+        model = Stock
+        fields = [
+            "id",
+            "branch",
+            "branch_name",
+            "product",
+            "product_name",
+            "quantity",
+            "reorder_level",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "quantity", "updated_at"]
+
+    def validate(self, attrs):
+        branch = attrs.get(
+            "branch",
+            getattr(self.instance, "branch", None),
+        )
+        product = attrs.get(
+            "product",
+            getattr(self.instance, "product", None),
+        )
+
+        if branch and product:
+            if branch.business_id != product.business_id:
+                raise serializers.ValidationError(
+                    "The branch and product must belong to the same business."
+                )
+
+        return attrs
+
+
+class StockMovementSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StockMovement
+        fields = [
+            "id",
+            "stock",
+            "movement_type",
+            "quantity_change",
+            "reference",
+            "notes",
+            "created_at",
+        ]
+        read_only_fields = [
+            "id",
+            "stock",
+            "movement_type",
+            "quantity_change",
+            "reference",
+            "notes",
+            "created_at",
+        ]
+
+========== sales/urls.py ==========
+from django.urls import include, path
+from rest_framework.routers import DefaultRouter
+
+from .views import SaleViewSet
+from .views_receipts import SaleReceiptView
+
+
+router = DefaultRouter()
+router.register("", SaleViewSet, basename="sale")
+
+urlpatterns = [
+    path("<uuid:sale_id>/receipt/", SaleReceiptView.as_view(), name="sale-receipt"),
+    path("", include(router.urls)),
+]
+
+========== sales/views.py ==========
+from django.core.exceptions import ValidationError as DjangoValidationError
+from rest_framework import status, viewsets
+from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from businesses.models import Membership
+from .models import Sale
+from .serializers import CreateSaleSerializer
+from .services import process_sale
+
+
+SALES_ROLES = {"owner", "admin", "manager", "cashier"}
+
+
+class SaleViewSet(viewsets.ReadOnlyModelViewSet):
+    permission_classes = [IsAuthenticated]
+    queryset = Sale.objects.none()
+
+    def get_queryset(self):
+        memberships = Membership.objects.filter(
+            user=self.request.user,
+            is_active=True,
+            business__is_active=True,
+            role__in=SALES_ROLES,
+        ).values_list("business_id", flat=True)
+
+        return Sale.objects.filter(
+            business_id__in=memberships
+        ).select_related(
+            "business",
+            "branch",
+            "cashier",
+        ).order_by("-created_at")
+
+    @action(detail=False, methods=["post"], url_path="checkout")
+    def checkout(self, request):
+        serializer = CreateSaleSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        membership = Membership.objects.filter(
+            user=request.user,
+            business=data["business"],
+            is_active=True,
+            business__is_active=True,
+            role__in=SALES_ROLES,
+        ).first()
+
+        if membership is None:
+            return Response(
+                {"detail": "You do not have permission to make sales for this business."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        assignments = membership.staff_assignment.all()
+
+        if assignments.exists() and not assignments.filter(
+            branch=data["branch"]
+        ).exists():
+            return Response(
+                {"detail": "You are not assigned to this branch."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            sale = process_sale(
+                business=data["business"],
+                branch=data["branch"],
+                cashier=request.user,
+                items=[
+                    {
+                        "product_id": str(item["product_id"]),
+                        "quantity": item["quantity"],
+                    }
+                    for item in data["items"]
+                ],
+                customer_id=data.get("customer_id") or None,
+                discount_amount=data["discount_amount"],
+                tax_amount=data["tax_amount"],
+                notes=data.get("notes", ""),
+                checkout_key=data["checkout_key"],
+            )
+        except DjangoValidationError as exc:
+            return Response(
+                {"detail": exc.messages},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            {
+                "id": str(sale.pk),
+                "sale_id": str(sale.pk),
+                "receipt_number": sale.receipt_number,
+                "status": sale.status,
+                "subtotal": str(sale.subtotal),
+                "discount_amount": str(sale.discount_amount),
+                "tax_amount": str(sale.tax_amount),
+                "total_amount": str(sale.total_amount),
+                "checkout_key": str(sale.checkout_key),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class CheckoutView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = CreateSaleSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        membership = Membership.objects.filter(
+            user=request.user,
+            business=data["business"],
+            is_active=True,
+            business__is_active=True,
+            role__in=SALES_ROLES,
+        ).first()
+
+        if membership is None:
+            return Response(
+                {"detail": "You do not have permission to make sales for this business."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        assignments = membership.staff_assignment.all()
+
+        if assignments.exists() and not assignments.filter(
+            branch=data["branch"]
+        ).exists():
+            return Response(
+                {"detail": "You are not assigned to this branch."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            sale = process_sale(
+                business=data["business"],
+                branch=data["branch"],
+                cashier=request.user,
+                items=[
+                    {
+                        "product_id": str(item["product_id"]),
+                        "quantity": item["quantity"],
+                    }
+                    for item in data["items"]
+                ],
+                customer_id=data.get("customer_id") or None,
+                discount_amount=data["discount_amount"],
+                tax_amount=data["tax_amount"],
+                notes=data.get("notes", ""),
+                checkout_key=data["checkout_key"],
+            )
+        except DjangoValidationError as exc:
+            return Response(
+                {"detail": exc.messages},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            {
+                "id": str(sale.pk),
+                "sale_id": str(sale.pk),
+                "receipt_number": sale.receipt_number,
+                "status": sale.status,
+                "subtotal": str(sale.subtotal),
+                "discount_amount": str(sale.discount_amount),
+                "tax_amount": str(sale.tax_amount),
+                "total_amount": str(sale.total_amount),
+                "checkout_key": str(sale.checkout_key),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+========== sales/serializers.py ==========
+from decimal import Decimal
+from rest_framework import serializers
+
+from businesses.models import Business, Branch
+from inventory.models import Product
+
+
+class SaleItemInputSerializer(serializers.Serializer):
+    product_id = serializers.UUIDField()
+    quantity = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        min_value=Decimal("0.001"),
+    )
+
+
+class CreateSaleSerializer(serializers.Serializer):
+    checkout_key = serializers.UUIDField()
+
+    business_id = serializers.UUIDField()
+    branch_id = serializers.UUIDField()
+
+    customer_id = serializers.CharField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+    )
+
+    discount_amount = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        min_value=Decimal("0.00"),
+        default=0,
+    )
+
+    tax_amount = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        min_value=Decimal("0.00"),
+        default=0,
+    )
+
+    notes = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+    )
+
+    items = SaleItemInputSerializer(many=True, allow_empty=False)
+
+    def validate(self, attrs):
+        business = Business.objects.filter(
+            pk=attrs["business_id"],
+            is_active=True,
+        ).first()
+
+        if business is None:
+            raise serializers.ValidationError({
+                "business_id": "The selected business is unavailable."
+            })
+
+        branch = Branch.objects.filter(
+            pk=attrs["branch_id"],
+            business=business,
+            is_active=True,
+        ).first()
+
+        if branch is None:
+            raise serializers.ValidationError({
+                "branch_id": "The selected branch is unavailable."
+            })
+
+        product_ids = [item["product_id"] for item in attrs["items"]]
+
+        if len(product_ids) != len(set(product_ids)):
+            raise serializers.ValidationError({
+                "items": "Each product must appear only once."
+            })
+
+        products = Product.objects.filter(
+            pk__in=product_ids,
+            business=business,
+            is_active=True,
+        )
+
+        products_by_id = {product.pk: product for product in products}
+
+        if len(products_by_id) != len(product_ids):
+            raise serializers.ValidationError({
+                "items": "One or more products are unavailable."
+            })
+
+        attrs["business"] = business
+        attrs["branch"] = branch
+        attrs["products"] = products_by_id
+
+        return attrs
+
+========== payments/urls.py ==========
+from django.urls import path
+
+from .views import PaymentCreateView
+
+urlpatterns = [
+    path("record/", PaymentCreateView.as_view(), name="record-payment"),
+]
+
+========== payments/views.py ==========
+from django.core.exceptions import ValidationError as DjangoValidationError
+
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from businesses.models import Membership
+from sales.models import Sale
+
+from .serializers import PaymentCreateSerializer
+from .services import record_payment
+
+
+PAYMENT_ROLES = {"owner", "admin", "manager", "cashier"}
+
+
+class PaymentCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = PaymentCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        sale = Sale.objects.filter(
+            pk=data["sale_id"],
+            business__is_active=True,
+        ).first()
+
+        if sale is None:
+            return Response(
+                {"detail": "Sale not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        membership = Membership.objects.filter(
+            user=request.user,
+            business=sale.business,
+            is_active=True,
+            role__in=PAYMENT_ROLES,
+        ).first()
+
+        if membership is None:
+            return Response(
+                {"detail": "You cannot record payments for this business."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        assignments = membership.staff_assignment.all()
+
+        if assignments.exists() and not assignments.filter(
+            branch=sale.branch
+        ).exists():
+            return Response(
+                {"detail": "You are not assigned to this branch."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            payment = record_payment(
+                sale_id=sale.pk,
+                business=sale.business,
+                received_by=request.user,
+                amount=data["amount"],
+                payment_method=data["payment_method"],
+                transaction_reference=data.get(
+                    "transaction_reference", ""
+                ),
+                notes=data.get("notes", ""),
+                idempotency_key=data.get("idempotency_key"),
+            )
+        except DjangoValidationError as exc:
+            return Response(
+                {"detail": exc.messages},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            {
+                "id": str(payment.pk),
+                "sale_id": str(payment.sale_id),
+                "amount": str(payment.amount),
+                "payment_method": payment.payment_method,
+                "status": payment.status,
+                "transaction_reference": payment.transaction_reference,
+                "idempotency_key": (
+                    str(payment.idempotency_key)
+                    if payment.idempotency_key else None
+                ),
+            },
+            status=(
+                status.HTTP_200_OK
+                if data.get("idempotency_key")
+                else status.HTTP_201_CREATED
+            ),
+        )
+
+========== payments/serializers.py ==========
+from decimal import Decimal
+
+from rest_framework import serializers
+
+
+class PaymentCreateSerializer(serializers.Serializer):
+    sale_id = serializers.UUIDField()
+
+    amount = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        min_value=Decimal("0.01"),
+    )
+
+    payment_method = serializers.ChoiceField(
+        choices=[
+            ("cash", "Cash"),
+            ("mobile_money", "Mobile Money"),
+            ("card", "Card"),
+            ("bank_transfer", "Bank Transfer"),
+        ]
+    )
+
+    transaction_reference = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=150,
+    )
+
+    notes = serializers.CharField(
+        required=False,
+        allow_blank=True,
+    )
+
+    idempotency_key = serializers.UUIDField(
+        required=False,
+        allow_null=True,
+    )
+
+========== purchasing/urls.py ==========
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+
+from .views import (
+    SupplierViewSet,
+    PurchaseViewSet,
+    CreatePurchaseView,
+    ReceivePurchaseView,
+)
+
+router = DefaultRouter()
+
+router.register(
+    "suppliers",
+    SupplierViewSet,
+    basename="supplier",
+)
+
+router.register(
+    "purchases",
+    PurchaseViewSet,
+    basename="purchase",
+)
+
+urlpatterns = [
+    path("", include(router.urls)),
+    path(
+        "purchases/create/",
+        CreatePurchaseView.as_view(),
+        name="create-purchase",
+    ),
+    path(
+        "purchases/<uuid:purchase_id>/receive/",
+        ReceivePurchaseView.as_view(),
+        name="receive-purchase",
+    ),
+]
+
+========== purchasing/views.py ==========
+from decimal import Decimal
+
+from django.db import transaction
+from django.db.models import Sum
+from django.utils import timezone
+
+from rest_framework import status, viewsets
+from rest_framework.decorators import action
+from rest_framework.exceptions import (
+    PermissionDenied,
+    ValidationError,
+)
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from businesses.models import Business, Branch, Membership
+from inventory.models import Product, Stock, StockMovement
+
+from .models import Supplier, Purchase, PurchaseItem
+from .serializers import (
+    SupplierSerializer,
+    PurchaseSerializer,
+    CreatePurchaseSerializer,
+)
+
+
+def get_membership(user, business_id):
+    membership = Membership.objects.filter(
+        user=user,
+        business_id=business_id,
+        is_active=True,
+    ).first()
+
+    if membership is None:
+        raise PermissionDenied(
+            "You do not have access to this business."
+        )
+
+    return membership
+
+
+def check_branch_access(membership, branch):
+    if branch.business_id != membership.business_id:
+        raise PermissionDenied(
+            "This branch does not belong to your business."
+        )
+
+    if membership.role in ["owner", "admin"]:
+        return
+
+    if not membership.branch_assignments.filter(
+        branch=branch
+    ).exists():
+        raise PermissionDenied(
+            "You are not assigned to this branch."
+        )
+
+
+class SupplierViewSet(viewsets.ModelViewSet):
+    serializer_class = SupplierSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        business_ids = Membership.objects.filter(
+            user=self.request.user,
+            is_active=True,
+        ).values_list("business_id", flat=True)
+
+        return Supplier.objects.filter(
+            business_id__in=business_ids
+        ).select_related("business")
+
+    def perform_create(self, serializer):
+        business = serializer.validated_data["business"]
+
+        membership = get_membership(
+            self.request.user,
+            business.id,
+        )
+
+        if membership.role not in [
+            "owner", "admin", "manager"
+        ]:
+            raise PermissionDenied(
+                "You cannot create suppliers."
+            )
+
+        serializer.save()
+
+    def perform_update(self, serializer):
+        supplier = self.get_object()
+
+        membership = get_membership(
+            self.request.user,
+            supplier.business_id,
+        )
+
+        if membership.role not in [
+            "owner", "admin", "manager"
+        ]:
+            raise PermissionDenied(
+                "You cannot update suppliers."
+            )
+
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        membership = get_membership(
+            self.request.user,
+            instance.business_id,
+        )
+
+        if membership.role not in [
+            "owner", "admin", "manager"
+        ]:
+            raise PermissionDenied(
+                "You cannot delete suppliers."
+            )
+
+        if instance.purchases.exists():
+            raise ValidationError(
+                "This supplier has purchase records. "
+                "Deactivate it instead."
+            )
+
+        instance.delete()
+
+
+class PurchaseViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = PurchaseSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        business_ids = Membership.objects.filter(
+            user=self.request.user,
+            is_active=True,
+        ).values_list("business_id", flat=True)
+
+        return Purchase.objects.filter(
+            business_id__in=business_ids
+        ).select_related(
+            "business",
+            "branch",
+            "supplier",
+            "created_by",
+        ).prefetch_related("items", "items__product")
+
+
+class CreatePurchaseView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = CreatePurchaseSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        data = serializer.validated_data
+
+        membership = get_membership(
+            request.user,
+            data["business_id"],
+        )
+
+        if membership.role not in [
+            "owner", "admin", "manager", "stock_manager"
+        ]:
+            raise PermissionDenied(
+                "You cannot create purchases."
+            )
+
+        branch = Branch.objects.filter(
+            id=data["branch_id"],
+            business_id=data["business_id"],
+            is_active=True,
+        ).first()
+
+        if branch is None:
+            raise ValidationError(
+                {"branch_id": "Invalid or inactive branch."}
+            )
+
+        check_branch_access(membership, branch)
+
+        supplier = Supplier.objects.filter(
+            id=data["supplier_id"],
+            business_id=data["business_id"],
+            is_active=True,
+        ).first()
+
+        if supplier is None:
+            raise ValidationError(
+                {"supplier_id": "Invalid or inactive supplier."}
+            )
+
+        items = data["items"]
+
+        product_ids = [item["product_id"] for item in items]
+
+        if len(product_ids) != len(set(product_ids)):
+            raise ValidationError(
+                "Each product may appear only once per purchase."
+            )
+
+        with transaction.atomic():
+            purchase = Purchase.objects.create(
+                business_id=data["business_id"],
+                branch=branch,
+                supplier=supplier,
+                created_by=request.user,
+                reference_number=data.get(
+                    "reference_number", ""
+                ),
+                notes=data.get("notes", ""),
+            )
+
+            total = Decimal("0.00")
+
+            for item in items:
+                product = Product.objects.filter(
+                    id=item["product_id"],
+                    business_id=data["business_id"],
+                    is_active=True,
+                ).first()
+
+                if product is None:
+                    raise ValidationError({
+                        "product_id": (
+                            f"Product {item['product_id']} "
+                            "does not exist in this business."
+                        )
+                    })
+
+                quantity = item["quantity"]
+                unit_cost = item["unit_cost"]
+                line_total = (quantity * unit_cost).quantize(
+                    Decimal("0.01")
+                )
+
+                PurchaseItem.objects.create(
+                    purchase=purchase,
+                    product=product,
+                    quantity=quantity,
+                    unit_cost=unit_cost,
+                    line_total=line_total,
+                )
+
+                total += line_total
+
+            purchase.total_amount = total.quantize(
+                Decimal("0.01")
+            )
+            purchase.save(update_fields=["total_amount"])
+
+        return Response(
+            {
+                "message": "Draft purchase created successfully.",
+                "purchase": PurchaseSerializer(purchase).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class ReceivePurchaseView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, purchase_id):
+        with transaction.atomic():
+            purchase = Purchase.objects.select_for_update().filter(
+                id=purchase_id
+            ).first()
+
+            if purchase is None:
+                return Response(
+                    {"error": "Purchase not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+            membership = get_membership(
+                request.user,
+                purchase.business_id,
+            )
+
+            if membership.role not in [
+                "owner", "admin", "manager", "stock_manager"
+            ]:
+                raise PermissionDenied(
+                    "You cannot receive purchases."
+                )
+
+            check_branch_access(membership, purchase.branch)
+
+            if purchase.status != "draft":
+                raise ValidationError(
+                    "Only draft purchases can be received."
+                )
+
+            purchase_items = list(
+                purchase.items.select_related("product")
+            )
+
+            if not purchase_items:
+                raise ValidationError(
+                    "Cannot receive a purchase without items."
+                )
+
+            for item in purchase_items:
+                if item.product.business_id != purchase.business_id:
+                    raise ValidationError(
+                        "A purchase contains a product "
+                        "from another business."
+                    )
+
+                stock, created = Stock.objects.get_or_create(
+                    branch=purchase.branch,
+                    product=item.product,
+                    defaults={"quantity": Decimal("0.000")},
+                )
+
+                stock = Stock.objects.select_for_update().get(
+                    pk=stock.pk
+                )
+
+                stock.quantity += item.quantity
+                stock.save(update_fields=["quantity", "updated_at"])
+
+                StockMovement.objects.create(
+                    stock=stock,
+                    movement_type="receipt",
+                    quantity_change=item.quantity,
+                    reference=(
+                        purchase.reference_number
+                        or str(purchase.id)
+                    ),
+                    notes="Stock received from purchase.",
+                )
+
+            purchase.status = "received"
+            purchase.received_at = timezone.now()
+            purchase.save(
+                update_fields=["status", "received_at"]
+            )
+
+        return Response({
+            "message": "Purchase received and stock updated.",
+            "purchase_id": str(purchase.id),
+            "status": purchase.status,
+            "received_at": purchase.received_at.isoformat(),
+        })
+
+========== purchasing/serializers.py ==========
+from rest_framework import serializers
+
+from .models import Supplier, Purchase, PurchaseItem
+
+
+class SupplierSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Supplier
+        fields = "__all__"
+        read_only_fields = ["id"]
+
+
+class PurchaseItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PurchaseItem
+        fields = "__all__"
+        read_only_fields = ["id", "purchase"]
+
+
+class PurchaseSerializer(serializers.ModelSerializer):
+    items = PurchaseItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Purchase
+        fields = "__all__"
+        read_only_fields = ["id"]
+
+
+class CreatePurchaseSerializer(serializers.ModelSerializer):
+    items = PurchaseItemSerializer(
+        many=True,
+        write_only=True,
+    )
+
+    class Meta:
+        model = Purchase
+        fields = [
+            "id",
+            "business",
+            "branch",
+            "supplier",
+            "reference_number",
+            "notes",
+            "items",
+        ]
+        read_only_fields = ["id"]
+
+    def validate_items(self, items):
+        if not items:
+            raise serializers.ValidationError(
+                "Provide at least one purchase item."
+            )
+        return items
+
+
+========== reporting/urls.py ==========
+from django.urls import path
+
+from .dashboard_api import POSDashboardView
+from .views import (
+    DashboardReportView,
+    SalesReportView,
+    InventoryReportView,
+    PurchasingReportView,
+)
+
+urlpatterns = [
+    path("dashboard/", DashboardReportView.as_view(), name="dashboard-report"),
+    path("pos-dashboard/", POSDashboardView.as_view(), name="pos-dashboard"),
+    path("sales/", SalesReportView.as_view(), name="sales-report"),
+    path("inventory/", InventoryReportView.as_view(), name="inventory-report"),
+    path("purchasing/", PurchasingReportView.as_view(), name="purchasing-report"),
+]
+
+========== reporting/views.py ==========
+from datetime import timedelta
+from decimal import Decimal
+from payments.models import Payment
+from django.db.models import Sum, Count, Avg, F, Q
+from django.utils import timezone
+
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.exceptions import ValidationError, PermissionDenied
+
+from businesses.models import Business, Membership, Branch
+from sales.models import Sale, SaleItem
+from inventory.models import Product, Stock
+from purchasing.models import Purchase
+
+
+def get_report_context(request):
+    """
+    Validate business access and return the permitted
+    business, branch, and membership.
+    """
+    business_id = request.query_params.get("business_id")
+    branch_id = request.query_params.get("branch_id")
+
+    if not business_id:
+        raise ValidationError({
+            "business_id": "This query parameter is required."
+        })
+
+    business = Business.objects.filter(
+        id=business_id,
+        is_active=True,
+    ).first()
+
+    if business is None:
+        raise ValidationError({
+            "business_id": "Business not found or inactive."
+        })
+
+    membership = Membership.objects.filter(
+        user=request.user,
+        business=business,
+        is_active=True,
+    ).first()
+
+    if membership is None:
+        raise PermissionDenied(
+            "You do not have access to this business."
+        )
+
+    branch = None
+
+    if branch_id:
+        branch = Branch.objects.filter(
+            id=branch_id,
+            business=business,
+            is_active=True,
+        ).first()
+
+        if branch is None:
+            raise ValidationError({
+                "branch_id": "Invalid branch for this business."
+            })
+
+        if membership.role not in ["owner", "admin"]:
+            if not membership.staff_assignment.filter(
+                branch=branch
+            ).exists():
+                raise PermissionDenied(
+                    "You are not assigned to this branch."
+                )
+
+    return business, branch, membership
+
+
+def get_sales_queryset(business, branch=None):
+    """
+    Return completed sales belonging to the selected
+    business and, optionally, branch.
+    """
+    sales = Sale.objects.filter(
+        business=business,
+        status="completed",
+    )
+
+    if branch is not None:
+        sales = sales.filter(branch=branch)
+
+    return sales
+
+
+def get_stock_queryset(business, branch=None):
+    """
+    Return stock belonging to the selected business.
+    """
+    stock = Stock.objects.filter(
+        branch__business=business,
+        product__is_active=True,
+    ).select_related("product", "branch")
+
+    if branch is not None:
+        stock = stock.filter(branch=branch)
+
+    return stock
+
+
+def decimal_string(value):
+    return str(value if value is not None else Decimal("0.00"))
+
+
+class DashboardReportView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        business, branch, membership = get_report_context(request)
+
+        sales = get_sales_queryset(business, branch)
+        stock = get_stock_queryset(business, branch)
+
+        today = timezone.localdate()
+
+        sales_today = sales.filter(
+            created_at__date=today
+        )
+
+        sales_summary = sales.aggregate(
+            total_sales=Sum("total_amount"),
+            sales_count=Count("id"),
+            average_sale=Avg("total_amount"),
+        )
+
+                # Calculate completed payments for the selected business and branch.
+        payments = Payment.objects.filter(
+            business=business,
+            status="completed",
+            sale__status="completed",
+        )
+
+        if branch is not None:
+            payments = payments.filter(sale__branch=branch)
+
+        payment_summary = payments.aggregate(
+            money_received=Sum("amount"),
+            payment_count=Count("id"),
+        )
+        
+        today_summary = sales_today.aggregate(
+            total_sales=Sum("total_amount"),
+            sales_count=Count("id"),
+        )
+
+        low_stock = stock.filter(
+            quantity__lte=F("reorder_level")
+        )
+
+        low_stock_items = [
+            {
+                "product_id": str(item.product_id),
+                "product_name": item.product.name,
+                "sku": item.product.sku,
+                "branch": item.branch.name,
+                "quantity": str(item.quantity),
+                "reorder_level": str(item.reorder_level),
+            }
+            for item in low_stock.order_by("quantity")[:20]
+        ]
+
+        total_products = Product.objects.filter(
+            business=business,
+            is_active=True,
+        ).count()
+
+        pending_purchases = Purchase.objects.filter(
+            business=business,
+            status="draft",
+        ).count()
+
+        recent_sales = sales.select_related(
+            "branch", "cashier", "customer"
+        ).order_by("-created_at")[:10]
+
+        recent_sales_data = [
+            {
+                "id": str(sale.id),
+                "receipt_number": sale.receipt_number,
+                "branch": sale.branch.name,
+                "cashier": (
+                    sale.cashier.username
+                    if sale.cashier else None
+                ),
+                "customer": (
+                    sale.customer.name
+                    if sale.customer else None
+                ),
+                "total_amount": str(sale.total_amount),
+                "created_at": sale.created_at.isoformat(),
+            }
+            for sale in recent_sales
+        ]
+
+        top_products = SaleItem.objects.filter(
+            sale__in=sales
+        ).values(
+            "product_id",
+            "product_name",
+            "sku",
+        ).annotate(
+            quantity_sold=Sum("quantity"),
+            revenue=Sum("line_total"),
+        ).order_by("-quantity_sold")[:5]
+
+        top_products_data = [
+            {
+                "product_id": str(item["product_id"]),
+                "product_name": item["product_name"],
+                "sku": item["sku"],
+                "quantity_sold": str(item["quantity_sold"]),
+                "revenue": str(item["revenue"] or Decimal("0.00")),
+            }
+            for item in top_products
+        ]
+
+        return Response({
+            "business_id": str(business.id),
+            "business_name": business.name,
+            "branch_id": str(branch.id) if branch else None,
+            "branch_name": branch.name if branch else "All branches",
+            "currency": business.currency,
+
+            "sales": {
+                "total_sales": decimal_string(
+                    sales_summary["total_sales"]
+                ),
+                "sales_count": sales_summary["sales_count"],
+                "average_sale": decimal_string(
+                    sales_summary["average_sale"]
+                ),
+            },
+
+            "sales_today": {
+                "total_sales": decimal_string(
+                    today_summary["total_sales"]
+                ),
+                "sales_count": today_summary["sales_count"],
+            },
+
+            "inventory": {
+                "total_products": total_products,
+                "low_stock_count": low_stock.count(),
+                "low_stock_items": low_stock_items,
+            },
+
+            "purchasing": {
+                "pending_purchases": pending_purchases,
+            },
+
+            "recent_sales": recent_sales_data,
+            "top_selling_products": top_products_data,
+
+            "money_received": str(payment_summary["money_received"] or Decimal("0.00")),
+            "completed_payment_count": payment_summary["payment_count"],
+        })
+
+
+class SalesReportView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        business, branch, membership = get_report_context(request)
+
+        sales = get_sales_queryset(business, branch)
+
+        start_date = request.query_params.get("start_date")
+        end_date = request.query_params.get("end_date")
+
+        if start_date:
+            sales = sales.filter(created_at__date__gte=start_date)
+
+        if end_date:
+            sales = sales.filter(created_at__date__lte=end_date)
+
+        summary = sales.aggregate(
+            total_revenue=Sum("total_amount"),
+            transaction_count=Count("id"),
+            average_sale=Avg("total_amount"),
+        )
+
+        sales_data = sales.select_related(
+            "branch", "cashier"
+        ).order_by("-created_at")[:100]
+
+        return Response({
+            "business_id": str(business.id),
+            "branch_id": str(branch.id) if branch else None,
+            "start_date": start_date,
+            "end_date": end_date,
+            "total_revenue": decimal_string(
+                summary["total_revenue"]
+            ),
+            "transaction_count": summary["transaction_count"],
+            "average_sale": decimal_string(
+                summary["average_sale"]
+            ),
+            "sales": [
+                {
+                    "id": str(sale.id),
+                    "receipt_number": sale.receipt_number,
+                    "branch": sale.branch.name,
+                    "cashier": (
+                        sale.cashier.username
+                        if sale.cashier else None
+                    ),
+                    "subtotal": str(sale.subtotal),
+                    "discount": str(sale.discount_amount),
+                    "tax": str(sale.tax_amount),
+                    "total": str(sale.total_amount),
+                    "created_at": sale.created_at.isoformat(),
+                }
+                for sale in sales_data
+            ],
+        })
+
+
+class InventoryReportView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        business, branch, membership = get_report_context(request)
+
+        stock = get_stock_queryset(business, branch)
+
+        low_stock = stock.filter(
+            quantity__lte=F("reorder_level")
+        )
+
+        stock_data = stock.order_by(
+            "product__name", "branch__name"
+        )[:500]
+
+        return Response({
+            "business_id": str(business.id),
+            "branch_id": str(branch.id) if branch else None,
+            "total_products": Product.objects.filter(
+                business=business,
+                is_active=True,
+            ).count(),
+            "low_stock_count": low_stock.count(),
+            "stock": [
+                {
+                    "product_id": str(item.product_id),
+                    "product_name": item.product.name,
+                    "sku": item.product.sku,
+                    "branch": item.branch.name,
+                    "quantity": str(item.quantity),
+                    "reorder_level": str(item.reorder_level),
+                    "unit_cost": str(item.product.cost_price),
+                    "stock_cost_value": str(
+                        item.quantity * item.product.cost_price
+                    ),
+                }
+                for item in stock_data
+            ],
+        })
+
+
+class PurchasingReportView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        business, branch, membership = get_report_context(request)
+
+        purchases = Purchase.objects.filter(
+            business=business
+        ).select_related("supplier", "branch")
+
+        if branch is not None:
+            purchases = purchases.filter(branch=branch)
+
+        summary = purchases.aggregate(
+                total_purchases=Count("id"),
+                 received_purchases=Count("id",filter=Q(status="received"),
+    ),
+)
+
+        purchase_data = purchases.order_by("-created_at")[:100]
+
+        return Response({
+            "business_id": str(business.id),
+            "branch_id": str(branch.id) if branch else None,
+            "total_purchases": summary["total_purchases"],
+            "received_purchases": summary["received_purchases"],
+            "pending_purchases": purchases.filter(
+                status="draft"
+            ).count(),
+            "purchases": [
+                {
+                    "id": str(purchase.id),
+                    "reference_number": purchase.reference_number,
+                    "supplier": purchase.supplier.name,
+                    "branch": purchase.branch.name,
+                    "status": purchase.status,
+                    "total_amount": str(purchase.total_amount),
+                    "created_at": purchase.created_at.isoformat(),
+                    "received_at": (
+                        purchase.received_at.isoformat()
+                        if purchase.received_at else None
+                    ),
+                }
+                for purchase in purchase_data
+            ],
+        })
+
+========== reporting/dashboard_api.py ==========
+from decimal import Decimal
+
+from django.db.models import Sum, Count, Avg, F
+from django.utils import timezone
+
+from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from businesses.models import Membership, Branch
+from sales.models import Sale, SaleItem
+from inventory.models import Product, Stock
+from purchasing.models import Purchase
+
+
+class POSDashboardView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        business_id = request.query_params.get("business_id")
+        branch_id = request.query_params.get("branch_id")
+
+        if not business_id:
+            raise ValidationError({
+                "business_id": "This query parameter is required."
+            })
+
+        membership = Membership.objects.filter(
+            user=request.user,
+            business_id=business_id,
+            is_active=True,
+        ).first()
+
+        if membership is None:
+            raise PermissionDenied(
+                "You do not have access to this business."
+            )
+
+        branches = Branch.objects.filter(
+            business_id=business_id,
+            is_active=True,
+        )
+
+        if membership.role not in ["owner", "admin"]:
+            branches = branches.filter(
+                id__in=membership.staff_assignment.values_list(
+                    "branch_id",
+                    flat=True,
+                )
+            )
+
+        if branch_id:
+            branch = branches.filter(id=branch_id).first()
+
+            if branch is None:
+                raise PermissionDenied(
+                    "You cannot access this branch."
+                )
+
+            branches = branches.filter(id=branch_id)
+
+        sales = Sale.objects.filter(
+            business_id=business_id,
+            branch__in=branches,
+            status="completed",
+        )
+
+        stock = Stock.objects.filter(
+            branch__in=branches,
+            product__business_id=business_id,
+        )
+
+        products = Product.objects.filter(
+            business_id=business_id,
+            is_active=True,
+        )
+
+        purchases = Purchase.objects.filter(
+            business_id=business_id,
+            branch__in=branches,
+        )
+
+        today = timezone.localdate()
+
+        today_sales = sales.filter(created_at__date=today)
+
+        sales_summary = sales.aggregate(
+            total=Sum("total_amount"),
+            count=Count("id"),
+            average=Avg("total_amount"),
+        )
+
+        today_summary = today_sales.aggregate(
+            total=Sum("total_amount"),
+            count=Count("id"),
+        )
+
+        low_stock = stock.filter(
+            quantity__lte=F("reorder_level"),
+            product__is_active=True,
+        ).select_related("product", "branch")
+
+        recent_sales = sales.select_related(
+            "branch", "cashier", "customer"
+        ).order_by("-created_at")[:10]
+
+        recent_sales_data = [
+            {
+                "id": str(sale.id),
+                "receipt_number": sale.receipt_number,
+                "branch": sale.branch.name,
+                "cashier": sale.cashier.get_username(),
+                "customer": (
+                    sale.customer.name if sale.customer else None
+                ),
+                "total": str(sale.total_amount),
+                "created_at": sale.created_at.isoformat(),
+            }
+            for sale in recent_sales
+        ]
+
+        low_stock_data = [
+            {
+                "product_id": str(item.product_id),
+                "product_name": item.product.name,
+                "sku": item.product.sku,
+                "branch": item.branch.name,
+                "quantity": str(item.quantity),
+                "reorder_level": str(item.reorder_level),
+            }
+            for item in low_stock.order_by("quantity")[:10]
+        ]
+
+        top_items = (
+            SaleItem.objects.filter(sale__in=sales)
+            .values("product_id", "product_name")
+            .annotate(
+                quantity_sold=Sum("quantity"),
+                sales_value=Sum("line_total"),
+            )
+            .order_by("-quantity_sold")[:5]
+        )
+
+        top_products_data = [
+            {
+                "product_id": str(item["product_id"]),
+                "product_name": item["product_name"],
+                "quantity_sold": str(item["quantity_sold"] or 0),
+                "sales_value": str(item["sales_value"] or Decimal("0.00")),
+            }
+            for item in top_items
+        ]
+
+        return Response({
+            "business_id": str(business_id),
+            "branch_id": str(branch_id) if branch_id else None,
+            "generated_at": timezone.now().isoformat(),
+
+            "sales": {
+                "total": str(sales_summary["total"] or Decimal("0.00")),
+                "count": sales_summary["count"],
+                "average": str(
+                    sales_summary["average"] or Decimal("0.00")
+                ),
+            },
+
+            "today": {
+                "sales_total": str(
+                    today_summary["total"] or Decimal("0.00")
+                ),
+                "sales_count": today_summary["count"],
+            },
+
+            "inventory": {
+                "active_products": products.count(),
+                "low_stock_count": low_stock.count(),
+                "low_stock_items": low_stock_data,
+            },
+
+            "purchasing": {
+                "draft_purchases": purchases.filter(
+                    status="draft"
+                ).count(),
+            },
+
+            "recent_sales": recent_sales_data,
+            "top_products": top_products_data,
+        })
+
+========== reporting/extra_reports.py ==========
+from decimal import Decimal
+
+from django.db.models import Sum, Count
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.response import Response
+
+from businesses.models import Membership, Branch
+from inventory.models import Product, Stock
+from purchasing.models import Purchase
+
+
+class BaseExtraReportView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_report_context(self, request):
+        business_id = request.query_params.get("business_id")
+
+        if not business_id:
+            raise ValidationError({
+                "business_id": "This field is required."
+            })
+
+        membership = Membership.objects.filter(
+            user=request.user,
+            business_id=business_id,
+            is_active=True,
+        ).first()
+
+        if not membership:
+            raise PermissionDenied(
+                "You do not have access to this business."
+            )
+
+        branches = Branch.objects.filter(
+            business_id=business_id,
+            is_active=True,
+        )
+
+        if membership.role not in ["owner", "admin"]:
+            branches = branches.filter(
+                id__in=membership.staff_assignment.values_list(
+                    "branch_id",
+                    flat=True,
+                )
+            )
+
+        branch_id = request.query_params.get("branch_id")
+
+        if branch_id:
+            if not branches.filter(id=branch_id).exists():
+                raise PermissionDenied(
+                    "You do not have access to this branch."
+                )
+
+            branches = branches.filter(id=branch_id)
+
+        return business_id, branches
+
+
+class InventoryReportView(BaseExtraReportView):
+    def get(self, request):
+        business_id, branches = self.get_report_context(request)
+
+        products = Product.objects.filter(
+            business_id=business_id,
+            is_active=True,
+        )
+
+        stocks = Stock.objects.filter(
+            branch__in=branches,
+            product__business_id=business_id,
+            product__is_active=True,
+        ).select_related("product", "branch")
+
+        total_stock_units = Decimal("0")
+        inventory_cost_value = Decimal("0")
+        low_stock_items = []
+
+        for stock in stocks:
+            quantity = stock.quantity or Decimal("0")
+            cost_price = stock.product.cost_price or Decimal("0")
+
+            total_stock_units += quantity
+            inventory_cost_value += quantity * cost_price
+
+            if quantity <= stock.reorder_level:
+                low_stock_items.append({
+                    "branch": str(stock.branch),
+                    "product_id": str(stock.product_id),
+                    "product": stock.product.name,
+                    "sku": stock.product.sku,
+                    "quantity": str(quantity),
+                    "reorder_level": str(stock.reorder_level),
+                })
+
+        return Response({
+            "summary": {
+                "active_products": products.count(),
+                "total_stock_units": str(total_stock_units),
+                "inventory_cost_value": str(
+                    inventory_cost_value.quantize(
+                        Decimal("0.01")
+                    )
+                ),
+                "low_stock_count": len(low_stock_items),
+            },
+            "low_stock_items": low_stock_items,
+        })
+
+
+class PurchasingReportView(BaseExtraReportView):
+    def get(self, request):
+        business_id, branches = self.get_report_context(request)
+
+        purchases = Purchase.objects.filter(
+            business_id=business_id,
+            branch__in=branches,
+        )
+
+        summary = purchases.aggregate(
+            total_purchases=Count("id"),
+            total_purchase_value=Sum("total_amount"),
+        )
+
+        status_summary = list(
+            purchases.values("status").annotate(
+                count=Count("id"),
+                amount=Sum("total_amount"),
+            ).order_by("status")
+        )
+
+        recent_purchases = purchases.select_related(
+            "supplier", "branch"
+        ).order_by("-created_at")[:10]
+
+        return Response({
+            "summary": {
+                "total_purchases": summary["total_purchases"] or 0,
+                "total_purchase_value": str(
+                    summary["total_purchase_value"] or Decimal("0.00")
+                ),
+            },
+            "by_status": [
+                {
+                    "status": item["status"],
+                    "count": item["count"],
+                    "amount": str(item["amount"] or Decimal("0.00")),
+                }
+                for item in status_summary
+            ],
+            "recent_purchases": [
+                {
+                    "id": str(purchase.id),
+                    "reference_number": purchase.reference_number,
+                    "supplier": purchase.supplier.name,
+                    "branch": str(purchase.branch),
+                    "status": purchase.status,
+                    "total_amount": str(purchase.total_amount),
+                    "created_at": purchase.created_at,
+                }
+                for purchase in recent_purchases
+            ],
+        })
