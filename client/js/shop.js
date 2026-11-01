@@ -6,8 +6,16 @@ function auth(mode = 'in') {
     <form id="f">${up ? '<label>Full name<input id="name" required autofocus></label><label>Phone<input id="phone" type="tel" required></label>' : ''}
     <label>Email<input id="email" type="email" required ${up ? '' : 'autofocus'}></label><label>Password${up ? ' (8+ characters)' : ''}<input id="pw" type="password" required minlength="${up ? 8 : 1}"></label>
     <p id="err" role="alert" style="color:var(--danger);min-height:1.2em;margin:0 0 8px"></p><button class="primary" style="width:100%">${up ? 'Create account' : 'Sign in'}</button></form>
+    ${up ? '' : `<div style="margin:14px 0 0;padding:10px 12px;border:1px dashed #c9d1dc;border-radius:10px;font-size:.82rem;display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <div><small>Demo client</small><br><code>client@shop.co.ke / client123</code></div>
+      <button type="button" id="demoUse">Use</button></div>`}
     <p class="sub" style="margin:12px 0 0">${up ? 'Already have an account?' : 'New here?'} <a href="#" id="sw">${up ? 'Sign in' : 'Create an account'}</a> · <a href="index.html">Back</a></p></div></div>`;
   $('#sw').onclick = e => { e.preventDefault(); auth(up ? 'in' : 'up'); };
+  // DEMO ONLY: remove this block (and the demo markup above) before going live
+  if ($('#demoUse')) $('#demoUse').onclick = () => {
+    $('#email').value = 'client@shop.co.ke'; $('#pw').value = 'client123';
+    $('#err').textContent = ''; $('#f').requestSubmit();   // remove requestSubmit() to only fill the fields
+  };
   $('#f').onsubmit = async e => { e.preventDefault(); try {
     me = up ? await API.clientSignup({ name: $('#name').value.trim(), phone: $('#phone').value.trim(), email: $('#email').value.trim(), password: $('#pw').value }) : await API.clientLogin($('#email').value, $('#pw').value);
     home(); } catch (x) { $('#err').textContent = x.message; } };

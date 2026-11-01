@@ -1,4 +1,3 @@
-
 const CONFIG = { USE_MOCK: true, BASE: '/api/v1', BRANCH_ID: 'branch-1', REGISTER_ID: 'register-1' };
 
 const RealAPI = {
@@ -43,6 +42,8 @@ const RealAPI = {
 
 const MockAPI = (() => {
   const KEY = 'pos_db', uid = () => crypto.randomUUID();
+  // DEMO ONLY: demo client for presentations. Remove before going live.
+  const DEMO_CLIENT = { id: 'c-demo', name: 'Amina (Demo Client)', phone: '0712345678', email: 'client@shop.co.ke', password: 'client123' };
   const seed = () => ({
     users: [
       { id: 'u1', name: 'Wanjiku (Manager)', email: 'manager@shop.co.ke', password: 'manager123', role: 'manager' },
@@ -56,7 +57,16 @@ const MockAPI = (() => {
     movements: [], sales: [], shift: null, idem: {}, seq: 1000
   });
   const save = d => (localStorage.setItem(KEY, JSON.stringify(d)), d);
-  const load = () => JSON.parse(localStorage.getItem(KEY) || 'null') || (save(seed()), load());
+  // Loads the database, and makes sure the demo client exists (also for browsers that already have saved data)
+  const load = () => {
+    const d = JSON.parse(localStorage.getItem(KEY) || 'null') || save(seed());
+    d.customers ||= [];
+    if (!d.customers.some(c => c.email === DEMO_CLIENT.email)) {
+      d.customers.push({ ...DEMO_CLIENT, createdAt: new Date().toISOString() });
+      save(d);
+    }
+    return d;
+  };
   const wait = v => new Promise(r => setTimeout(() => r(structuredClone(v)), 80));
   const fail = m => new Promise((_, j) => setTimeout(() => j(new Error(m)), 80));
   const me = () => JSON.parse(sessionStorage.getItem('pos_user') || 'null');
