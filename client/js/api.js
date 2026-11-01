@@ -42,7 +42,7 @@ const RealAPI = {
 
 const MockAPI = (() => {
   const KEY = 'pos_db', uid = () => crypto.randomUUID();
-  // DEMO ONLY: demo client for presentations. Remove before going live.
+  // DEMO ONLY: demo client for presentations. 
   const DEMO_CLIENT = { id: 'c-demo', name: 'Amina (Demo Client)', phone: '0712345678', email: 'client@shop.co.ke', password: 'client123' };
   const seed = () => ({
     users: [
