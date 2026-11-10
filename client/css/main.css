@@ -494,3 +494,18 @@ html:has(.hero){background:#14213d} /* no cream strip showing when a phone over-
   .rp-report .iv-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
   .rp-report .rp-col i,.rp-report .rp-hb .t i,.rp-report .iv-pill,.rp-report .rp-donut,.rp-report .iv-stat .ic,.rp-report .rp-total td{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 }
+/*payment*/
+
+.rp-filters{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media(max-width:620px){.rp-filters{grid-template-columns:minmax(0,1fr)}}
+.pm-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+.pm-bar .grow{flex:1 1 200px}
+.pm-in{color:var(--ok);font-weight:600}.pm-out{color:var(--danger);font-weight:600}
+td input[type=checkbox],th input[type=checkbox]{width:20px;height:20px;min-height:0;padding:0}
+td input.stmt{width:150px;min-height:0;padding:6px 8px}
+@media(max-width:720px){td input.stmt{width:140px}}
+.pm-sum{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:12px}
+.pm-sum div{border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.pm-sum small{display:block}.pm-sum b{font-variant-numeric:tabular-nums}
+@media(max-width:480px){.pm-sum{grid-template-columns:minmax(0,1fr)}}
+@media print{.pm-bar button,td button{display:none!important}}

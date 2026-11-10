@@ -130,7 +130,7 @@ function drawMoves() {
   $('#more').style.display = moves.length > 12 ? '' : 'none'; $('#more').textContent = allMoves ? 'Show fewer' : 'Show all ' + moves.length;
 }
 
-/* ---------- actions ---------- */
+/*  actions  */
 function move(p, type) {
   const rec = type === 'RECEIVE';
   const d = modal(`<h2>${rec ? 'Receive stock' : 'Adjust stock'}: ${esc(p.name)}</h2><p class="sub">On hand: ${p.stock}</p>
