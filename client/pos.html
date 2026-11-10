@@ -1,12 +1,44 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#14213d">
-<title>Checkout · Universal POS</title><link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/main.css"></head><body><nav id="nav"></nav><main>
-<div class="pos"><section class="left"><div id="banner"></div><input id="q" placeholder="Scan barcode or search products (F2)" autocomplete="off" autofocus><div class="grid" id="grid"></div></section>
-<section class="card cart" id="cart"><button class="cart-toggle" id="ct" aria-expanded="false" aria-controls="cartBody"><span id="ctl">Current sale</span><span class="chev" aria-hidden="true">▲</span></button>
-<div class="cart-body" id="cartBody"><h2 class="desk-only">Current sale</h2><div class="lines" id="lines"></div>
-<div class="row" style="margin-top:8px"><input id="cust" class="grow" placeholder="Client phone or email" aria-label="Client phone or email"><button id="cl">Add client</button></div><div id="chip" style="min-height:1.4em;margin:4px 0"></div>
-<div class="row" style="margin-top:8px;flex-wrap:nowrap"><label class="grow" style="margin:0">Discount<input id="disc" type="number" min="0" step="0.01" placeholder="0"></label><select id="dtype" style="width:84px;margin-top:18px" aria-label="Discount type"><option value="amt">KES</option><option value="pct">%</option></select></div>
-<div class="row" style="justify-content:space-between;margin-top:10px;color:var(--mute)"><span>Subtotal</span><span id="sub">KES 0.00</span></div></div>
-<div class="total"><span>Total</span><span id="total">KES 0.00</span></div>
-<div class="row" style="flex-wrap:nowrap"><button id="clear">Clear</button><button class="primary grow" id="pay">Charge (F9)</button></div></section></div>
-</main><script src="js/api.js"></script><script src="js/app.js"></script><script src="js/pos.js"></script></body></html>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0a2463">
+    <title>Checkout · Universal POS</title><link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/main.css"></head><body><nav id="nav"></nav><main>
+    <div class="pos">
+    
+      <!-- LEFT: product panel (search, tabs, product tiles) -->
+      <section class="left" aria-label="Products">
+        <div id="banner"></div>
+        <div class="searchbar">
+          <input id="q" type="search" placeholder="Scan barcode or search products (F2)" autocomplete="off" autofocus aria-label="Search products">
+          <span id="shiftb" class="shiftb off">Shift …</span>
+        </div>
+        <div class="tabs" id="tabs" role="tablist" aria-label="Product views"></div>
+        <div class="cats" id="cats"></div>
+        <div class="pgrid" id="grid"></div>
+      </section>
+    
+      <!-- RIGHT: current sale -->
+      <section class="pcart" id="cart" aria-label="Current sale">
+        <button class="cart-toggle" id="ct" aria-expanded="false" aria-controls="cartBody"><span id="ctl">Current sale</span><span class="chev" aria-hidden="true">▲</span></button>
+    
+        <div class="cart-body" id="cartBody">
+          <h2 class="desk-only cart-title" id="ctl2">Current sale</h2>
+          <div class="cart-head" aria-hidden="true"><span>#</span><span>Quantity</span><span>Item</span><span class="n">Price</span><span class="n">Total</span><span></span></div>
+          <div class="lines" id="lines"></div>
+    
+          <div class="cart-lower">
+            <div class="cust-box">
+              <div class="row"><input id="cust" class="grow" placeholder="Client phone or email" aria-label="Client phone or email"><button id="cl" type="button">Add client</button></div>
+              <div id="chip" style="min-height:1.4em"></div>
+              <div class="row" style="flex-wrap:nowrap"><label class="grow" style="margin:0">Discount<input id="disc" type="number" min="0" step="0.01" placeholder="0"></label><select id="dtype" style="width:84px;margin-top:18px" aria-label="Discount type"><option value="amt">KES</option><option value="pct">%</option></select></div>
+            </div>
+            <div class="acts" id="acts" aria-label="Quick actions"></div>
+          </div>
+    
+          <div class="sumrows"><div><span>Subtotal</span><span id="sub">KES 0.00</span></div><div><span>Discount</span><span id="dsum">KES 0.00</span></div></div>
+        </div>
+    
+        <div class="total"><span>Total</span><span id="total">KES 0.00</span></div>
+        <div class="foot-btns"><button id="clear" type="button">Cancel Sale</button><button class="primary" id="pay" type="button">Payment (F9)</button></div>
+      </section>
+    
+    </div>
+    </main><script src="js/api.js"></script><script src="js/app.js"></script><script src="js/pos.js"></script></body></html>

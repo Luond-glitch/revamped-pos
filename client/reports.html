@@ -1,7 +1,19 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#14213d">
-<title>Reports · Universal POS</title><link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/main.css"></head><body><nav id="nav"></nav><main>
-<h1>Reports</h1><div class="row" style="margin:8px 0 16px"><label style="margin:0">From<input type="date" id="from"></label><label style="margin:0">To<input type="date" id="to"></label></div>
-<div class="stats" id="stats"></div><div class="row" style="align-items:flex-start"><div class="card grow"><h2>Payment methods</h2><table id="pay"></table></div><div class="card grow"><h2>By cashier</h2><table id="cash"></table></div></div>
-<div class="card" style="margin-top:16px"><h2>Products sold</h2><table id="prod"></table></div><div class="card" style="margin-top:16px"><h2>Stock now</h2><p class="sub" id="val"></p><table id="low"></table></div>
-</main><script src="js/api.js"></script><script src="js/app.js"></script><script src="js/reports.js"></script></body></html>
+    <title>Reports · Universal POS</title><link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/main.css"><link rel="stylesheet" href="css/reports.css"></head><body><nav id="nav"></nav><main>
+    <div class="iv rp-report">
+      <header class="iv-head"><div><h1>Reports</h1><p>Sales, products, stock, profit, cashiers and branches</p></div>
+        <div class="iv-actions rp-noprint"><button type="button" id="csv">Download CSV</button><button type="button" id="print" class="btn gold">Print / Save PDF</button></div></header>
+      <p class="rp-printmeta" id="printmeta"></p>
+      <section class="card rp-filters rp-noprint" aria-label="Report filters">
+        <div class="rp-presets" id="presets"><button type="button" data-p="today">Today</button><button type="button" data-p="7">Last 7 days</button><button type="button" data-p="30">Last 30 days</button><button type="button" data-p="month">This month</button><button type="button" data-p="year">This year</button></div>
+        <label>From<input type="date" id="from"></label>
+        <label>To<input type="date" id="to"></label>
+        <label>Group by<select id="mode"><option value="day">Daily</option><option value="week">Weekly</option><option value="month">Monthly</option><option value="year">Annual</option></select></label>
+        <label>Branch<select id="branch"><option value="">All branches</option></select></label>
+      </section>
+      <div class="iv-stats rp-kpis" id="stats" style="--cols:3"></div>
+      <div class="rp-tabs rp-noprint" id="tabs" role="tablist" aria-label="Report type"></div>
+      <div id="view"></div>
+    </div>
+    </main><script src="js/api.js"></script><script src="js/app.js"></script><script src="js/analytics.js"></script><script src="js/reports.js"></script></body></html>

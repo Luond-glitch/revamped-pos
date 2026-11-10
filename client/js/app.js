@@ -26,7 +26,10 @@ async function boot(page) {
   let user;
   try { user = await API.me(); } catch { location.href = 'login.html'; return new Promise(() => {}); }
   const links = NAV.filter(n => n[2].includes(user.role)).map(([id, label]) => `<a href="${id}.html" class="${id === page ? 'on' : ''}">${label}</a>`).join('');
-  $('#nav').innerHTML = `<div class="top"><span class="brand">Universal POS</span><button id="menu" aria-expanded="false" aria-controls="navlinks" aria-label="Open menu">☰</button></div><div id="navlinks">${links}<div class="who">${esc(user.name)}<button id="logout">Sign out</button></div></div>`;
+  // .clock is only visible on the Checkout page (see main.css); the nav becomes a top bar there.
+  $('#nav').innerHTML = `<div class="top"><span class="brand">Universal POS</span><span class="clock" id="clock" aria-hidden="true"></span><button id="menu" aria-expanded="false" aria-controls="navlinks" aria-label="Open menu">☰</button></div><div id="navlinks">${links}<div class="who"><span>${esc(user.name)}</span><button id="logout">Sign out</button></div></div>`;
+  const tick = () => { const n = new Date(); $('#clock').textContent = n.toLocaleDateString('en-KE', { weekday: 'short', day: 'numeric', month: 'short' }) + ' · ' + n.toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit', hour12: false }); };
+  tick(); setInterval(tick, 15000);
   $('#logout').onclick = async () => { await API.logout(); location.href = 'login.html'; };
   const setMenu = open => { $('#nav').classList.toggle('open', open); const m = $('#menu'); m.setAttribute('aria-expanded', open); m.setAttribute('aria-label', open ? 'Close menu' : 'Open menu'); m.textContent = open ? '✕' : '☰'; };
   $('#menu').onclick = () => setMenu(!$('#nav').classList.contains('open')); document.addEventListener('keydown', e => { if (e.key === 'Escape') setMenu(false); });

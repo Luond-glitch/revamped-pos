@@ -1,5 +1,7 @@
 /* Universal POS: responsive stylesheet. Phone first, then tablet (900px), then desktop POS layout (1000px). */
-:root{--ink:#1c2333;--paper:#faf7f2;--card:#fff;--line:#e9e3d8;--mute:#6b7385;--accent:#0f7b5f;--accent-ink:#fff;--gold:#f0a91d;--warn:#b45309;--danger:#b42318;--ok:#18794e;--nav:#14213d;--r:10px;--navw:208px;--pad:clamp(14px,3vw,26px)}
+:root{--ink:#1c2333;--paper:#faf7f2;--card:#fff;--line:#e9e3d8;--mute:#6b7385;--accent:#0f7b5f;--accent-ink:#fff;--gold:#f0a91d;--warn:#b45309;--danger:#b42318;--ok:#18794e;--nav:#14213d;--r:10px;--navw:208px;--pad:clamp(14px,3vw,26px)
+  /* Checkout (POS) palette, modelled on the proposal screens */
+  --pos-bar:#0a2463;--pos-blue:#1f5fd0;--pos-blue-d:#133f94;--pos-green:#1f9d55;--pos-red:#c62828}
 @media(prefers-color-scheme:dark){:root{--ink:#ecebe6;--paper:#0e141f;--card:#17202f;--line:#27324a;--mute:#9aa3b8;--accent:#34d399;--accent-ink:#04231a;--gold:#f6bd4a;--warn:#f0a050;--danger:#ff8a80;--ok:#5fd39b;--nav:#0a0f1a}}
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
 body{margin:0;font:15px/1.5 Figtree,system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--paper);color:var(--ink);min-height:100vh;min-height:100dvh}
@@ -12,6 +14,7 @@ body:has(> #nav){display:grid;grid-template-columns:minmax(0,1fr);grid-template-
 #nav{background:var(--nav);color:#dfe6f3;position:sticky;top:0;z-index:30;padding:8px 14px;padding-top:max(8px,env(safe-area-inset-top))}
 #nav .top{display:flex;align-items:center;justify-content:space-between;min-height:44px}
 #nav .brand{font-weight:700;font-size:1.1rem;color:#fff}
+#nav .clock{display:none;font-variant-numeric:tabular-nums;font-size:.85rem;color:#c9d6f5;margin:0 auto 0 14px;white-space:nowrap}
 #menu{background:transparent;color:#fff;border:1px solid #ffffff44;font-size:1.2rem;line-height:1;min-width:44px;min-height:44px;padding:0}
 #navlinks{display:none;flex-direction:column;gap:2px;padding:8px 0 6px;max-height:calc(100dvh - 70px);overflow:auto}
 #nav.open #navlinks{display:flex}
@@ -93,26 +96,133 @@ dialog::backdrop{background:#0008}dialog .actions{display:flex;flex-wrap:wrap;ga
 .toast{background:var(--ink);color:var(--paper);padding:10px 14px;border-radius:8px;max-width:420px;box-shadow:0 4px 16px #0003}.toast.err{background:var(--danger);color:#fff}
 @media(min-width:900px){#toasts{left:auto;right:16px;top:auto;bottom:16px;justify-items:end}}
 
-/* Checkout: product grid + cart. Phones/tablets: cart is a bottom sheet. 1000px+: two columns. */
-main:has(.pos){padding-bottom:0}
-.pos{display:block;padding-bottom:170px}.pos .left{display:block}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-top:12px;align-content:start}
-.tile{text-align:left;padding:10px;display:flex;flex-direction:column;gap:4px;min-height:84px;overflow:hidden}.tile b{font-weight:600}.tile small{color:var(--mute)}
-.tile .pic{width:100%;height:auto;aspect-ratio:4/3;object-fit:cover;border-radius:6px}.tile:hover:not(:disabled){border-color:var(--accent);box-shadow:0 2px 10px #0001}
-.cart{position:fixed;left:0;right:0;bottom:0;z-index:25;border-radius:16px 16px 0 0;box-shadow:0 -6px 24px #0003;padding:6px 14px calc(10px + env(safe-area-inset-bottom));max-height:88dvh;display:flex;flex-direction:column;overflow:hidden}
-.cart-toggle{display:flex;width:100%;justify-content:space-between;align-items:center;border:0;background:transparent;font-weight:600;padding:6px 0}.cart.open .chev{transform:rotate(180deg)}
-.cart-body{display:none;overflow:auto;max-height:52dvh;padding-bottom:6px}.cart.open .cart-body{display:block}
-.line{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
+/* Shared small pieces (also used by the payment dialog) */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-top:12px;align-content:start} /* kept in case another page uses it */
 .qty{display:flex;align-items:center;gap:6px}.qty button{padding:2px 9px}
+.line{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
 .total{font-size:1.3rem;font-weight:700;display:flex;justify-content:space-between;margin:8px 0}
-@media(min-width:1000px){
-  main:has(.pos){padding:16px}
-  .pos{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;height:calc(100dvh - 32px);padding-bottom:0}
-  .pos .left{display:flex;flex-direction:column;min-height:0}.grid{overflow:auto;grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
-  .cart{position:static;border-radius:var(--r);box-shadow:none;padding:16px;max-height:none;overflow:hidden}.cart-toggle{display:none}
-  .cart-body{display:flex;flex-direction:column;flex:1;min-height:0;max-height:none}.lines{flex:1;overflow:auto}.total{font-size:1.7rem}
+
+/* =====================================================================
+   CHECKOUT (POS) – layout modelled on the proposal:
+   top bar · product panel (search, tabs, blue tiles) · sale panel (cart table, client/discount,
+   quick actions, totals, Cancel Sale / Payment).
+   Phones & tablets: products first, sale panel is a bottom sheet. 1000px+: two columns.
+   ===================================================================== */
+main:has(.pos){padding:10px 10px 0;display:flex;flex-direction:column}
+.pos{flex:1;display:block;padding-bottom:182px}
+.pos .left{display:flex;flex-direction:column;gap:10px;min-width:0}
+
+/* top bar on the Checkout page */
+body:has(.pos) #nav{background:var(--pos-bar)}
+body:has(.pos) #nav .clock{display:inline-block}
+body:has(.pos) #nav a.on{background:var(--gold)}
+
+/* product panel */
+.searchbar{display:flex;gap:10px;align-items:center}
+.searchbar input{flex:1;min-width:0;border:2px solid var(--line);border-radius:10px;font-weight:500}
+.searchbar input:focus{outline:none;border-color:var(--pos-blue);box-shadow:0 0 0 3px color-mix(in srgb,var(--pos-blue) 20%,transparent)}
+.shiftb{flex:none;white-space:nowrap;font-size:.8rem;font-weight:600;padding:6px 12px;border-radius:99px;background:color-mix(in srgb,var(--ok) 16%,transparent);color:var(--ok)}
+.shiftb.off{background:color-mix(in srgb,var(--danger) 16%,transparent);color:var(--danger)}
+.tabs{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--card)}
+.tabs button{flex:1;border:0;border-radius:0;background:transparent;padding:10px 8px;font-weight:600;color:var(--mute)}
+.tabs button + button{border-left:1px solid var(--line)}
+.tabs button.on{background:var(--pos-green);color:#fff}
+.cats{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;scrollbar-width:thin}.cats:empty{display:none}
+.cats button{white-space:nowrap;border-radius:99px;padding:5px 14px;font-size:.85rem}
+.cats button.on{background:var(--pos-blue);border-color:var(--pos-blue);color:#fff}
+.pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;align-content:start}
+.pgrid .empty{grid-column:1/-1}
+.ptile{display:grid;grid-template-columns:52px minmax(0,1fr);column-gap:10px;row-gap:1px;align-items:center;align-content:center;text-align:left;padding:10px;min-height:78px;
+  border:0;border-radius:10px;color:#fff;background:linear-gradient(160deg,var(--pos-blue),var(--pos-blue-d));box-shadow:0 2px 6px #0003;overflow:hidden;
+  transition:transform .12s,box-shadow .12s,filter .12s}
+.ptile .pic{grid-row:1 / span 3;width:52px;height:52px;aspect-ratio:auto;border-radius:8px;object-fit:cover;background:#fff}
+.ptile .ph.pic{font-size:1.05rem}
+.ptile b{font-weight:600;font-size:.92rem;line-height:1.2;overflow-wrap:anywhere}
+.ptile span{font-weight:700;color:#ffd66b;font-variant-numeric:tabular-nums}
+.ptile small{color:#cfe0ff;font-size:.75rem}
+.ptile:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 8px 16px #0004;border-color:transparent}
+.ptile:active:not(:disabled){transform:scale(.97)}
+.ptile:disabled{filter:grayscale(1) brightness(.85);opacity:.55}
+@media(max-width:420px){.ptile{grid-template-columns:44px minmax(0,1fr);padding:8px;column-gap:8px}.ptile .pic{width:44px;height:44px}}
+
+/* sale panel (bottom sheet on phones/tablets) */
+.pcart{position:fixed;left:0;right:0;bottom:0;z-index:25;display:flex;flex-direction:column;overflow:hidden;max-height:90dvh;
+  background:var(--card);border:1px solid var(--line);border-radius:16px 16px 0 0;box-shadow:0 -6px 24px #0004;padding:2px 12px calc(10px + env(safe-area-inset-bottom))}
+.cart-toggle{display:flex;width:100%;justify-content:space-between;align-items:center;border:0;background:transparent;font-weight:600;padding:8px 0;min-height:44px}
+.chev{transition:transform .2s}.pcart.open .chev{transform:rotate(180deg)}
+.cart-body{display:none;overflow:auto;max-height:56dvh;padding-bottom:6px}
+.pcart.open .cart-body{display:block}
+.cart-title{margin:0 0 8px}
+
+/* cart rows: compact on phones, table columns from 640px */
+.cart-head{display:none}
+.cl{display:grid;grid-template-columns:minmax(0,1fr) auto auto;grid-template-areas:"nm nm rm" "qty . tt";gap:6px 10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
+.cl .no,.cl .pr{display:none}
+.cl .nm{grid-area:nm;font-weight:600;min-width:0;overflow-wrap:anywhere}.cl .nm small{display:block;color:var(--mute);font-weight:400}
+.cl .qty{grid-area:qty}.cl .qty span{min-width:1.8em;text-align:center;font-weight:600;font-variant-numeric:tabular-nums}
+.cl .tt{grid-area:tt}.cl .n{text-align:right;font-variant-numeric:tabular-nums}
+.rm{grid-area:rm;display:grid;place-items:center;min-width:34px;min-height:34px;padding:4px;border:0;background:transparent;color:var(--danger)}
+.rm svg,.act svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.rm:hover{background:color-mix(in srgb,var(--danger) 12%,transparent);border-radius:8px}
+@media(min-width:640px){
+  .cart-head,.cl{grid-template-columns:28px 112px minmax(0,1fr) 92px 104px 36px}
+  .cart-head{display:grid;gap:6px 10px;padding:8px 0;font-size:.78rem;font-weight:600;color:var(--mute);border-bottom:2px solid var(--line);position:sticky;top:0;background:var(--card);z-index:1}
+  .cart-head .n{text-align:right}
+  .cl{grid-template-areas:"no qty nm pr tt rm"}
+  .cl .no{grid-area:no;display:block;color:var(--mute)}.cl .pr{grid-area:pr;display:block}
 }
-@media(min-width:1280px){.pos{grid-template-columns:minmax(0,1fr) 380px}}
+
+/* client, discount, quick actions */
+.cart-lower{display:grid;gap:12px;margin-top:12px}
+.cust-box{display:grid;gap:6px;align-content:start}.cust-box .row{flex-wrap:nowrap}
+.acts{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;align-content:start}
+.act{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-height:58px;padding:8px 4px;font:inherit;font-size:.72rem;line-height:1.15;text-align:center;
+  text-decoration:none;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;transition:border-color .15s,background .15s,transform .1s}
+.act svg{width:20px;height:20px;color:var(--pos-blue)}
+.act:hover:not(:disabled){border-color:var(--pos-blue);background:color-mix(in srgb,var(--pos-blue) 8%,var(--card))}
+.act:active:not(:disabled){transform:scale(.96)}
+.act:disabled{opacity:.4}
+.sumrows{display:grid;gap:2px;margin-top:10px;color:var(--mute)}.sumrows div{display:flex;justify-content:space-between}
+
+/* totals + main buttons (always visible, even when the sheet is collapsed) */
+.pcart .total{align-items:center;margin:8px 0;padding:8px 14px;border-radius:10px;
+  background:color-mix(in srgb,var(--pos-green) 14%,var(--card));border:1px solid color-mix(in srgb,var(--pos-green) 40%,var(--line))}
+.pcart .total span:last-child{color:var(--ok);font-variant-numeric:tabular-nums}
+.foot-btns{display:grid;grid-template-columns:1fr 2fr;gap:10px}
+.foot-btns button{min-height:48px;font-weight:700;font-size:1rem;color:#fff;border:0}
+.foot-btns #clear{background:var(--pos-red)}.foot-btns #pay{background:var(--pos-green)}
+.foot-btns button:hover:not(:disabled){filter:brightness(1.1)}
+
+/* top bar on tablets and up */
+@media(min-width:900px){
+  body:has(> #nav):has(.pos){grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
+  body:has(.pos) #nav{height:auto;min-height:52px;flex-direction:row;align-items:center;gap:12px;padding:0 14px;overflow:visible}
+  body:has(.pos) #nav .top{padding:0;min-height:52px;gap:12px;flex:none;justify-content:flex-start}
+  body:has(.pos) #nav .clock{margin:0}
+  body:has(.pos) #navlinks{flex-direction:row;align-items:center;gap:2px;flex:1;min-width:0;overflow-x:auto;scrollbar-width:none}
+  body:has(.pos) #nav a{padding:8px 10px;white-space:nowrap;font-size:.92rem}
+  body:has(.pos) #nav .who{display:flex;align-items:center;gap:10px;margin:0 0 0 auto;padding:0 0 0 12px;border:0;white-space:nowrap;position:sticky;right:0;background:var(--pos-bar)}
+  body:has(.pos) #nav .who button{margin:0;width:auto;padding:5px 12px}
+}
+
+/* desktop: two columns, no page scroll – the product grid and the cart rows scroll inside their panels */
+@media(min-width:1000px){
+  body:has(> #nav):has(.pos){height:100vh;height:100dvh;overflow:hidden}
+  main:has(.pos){padding:10px 12px 12px;min-height:0;overflow:hidden}
+  .pos{display:grid;grid-template-columns:minmax(300px,36%) minmax(0,1fr);gap:12px;min-height:0;padding-bottom:0}
+  .pos .left{min-height:0}
+  .pgrid{flex:1;min-height:0;overflow:auto;padding:2px 4px 8px 2px;grid-template-columns:repeat(auto-fill,minmax(165px,1fr))}
+  .pcart{position:static;min-height:0;max-height:none;border-radius:12px;box-shadow:0 2px 10px #0001;padding:12px 14px}
+  .cart-toggle{display:none}
+  .pcart .cart-body,.pcart.open .cart-body{display:flex;flex-direction:column;flex:1;min-height:0;max-height:none;overflow:hidden;padding-bottom:0}
+  .lines{flex:1;min-height:90px;overflow:auto}
+  .cart-head{position:static}
+  .cart-lower{grid-template-columns:1.1fr 1fr;flex:none}
+  .acts{grid-template-columns:repeat(3,1fr)}
+  .pcart .total{font-size:1.7rem}
+}
+@media(min-width:1280px){.pos{grid-template-columns:minmax(340px,34%) minmax(0,1fr)}}
+@media(min-width:1000px) and (max-height:700px){.act{min-height:46px;padding:5px 3px}.cart-lower{gap:8px;margin-top:8px}.sumrows{display:none}}
 
 /* Client page and start page */
 .shopgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:14px;margin-top:14px}
@@ -135,7 +245,7 @@ html:has(.hero){background:#14213d} /* no cream strip showing when a phone over-
 .portal:active{transform:scale(.98)}.portal:focus-visible{outline:3px solid #fff;outline-offset:3px}
 @media(hover:hover){.portal:hover{background:var(--gold);color:#14213d;border-color:var(--gold)}.portal:hover::after{color:#14213d}}
 @media(max-height:480px){.hero{justify-content:flex-start;gap:14px}.portal{padding:14px}.hero h1{font-size:1.7rem}} /* phone turned sideways */
-@media(prefers-reduced-motion:reduce){.portal{transition:none}}
+@media(prefers-reduced-motion:reduce){.portal,.ptile,.act,.chev{transition:none}}
 /* Receipt + print */
 .receipt{font:13px/1.5 ui-monospace,Menlo,monospace;text-align:left}
 .receipt hr{border:0;border-top:1px dashed var(--mute)}
@@ -165,3 +275,222 @@ html:has(.hero){background:#14213d} /* no cream strip showing when a phone over-
 .bl{grid-template-columns:auto 1fr auto auto auto}
 @media(max-width:640px){.bl{grid-template-columns:auto 1fr auto;grid-template-areas:"pic name rm" "pic qty total"}
 .bl>:nth-child(1){grid-area:pic}.bl>:nth-child(2){grid-area:name}.bl>:nth-child(3){grid-area:qty}.bl>:nth-child(4){grid-area:total;text-align:right}.bl>:nth-child(5){grid-area:rm}}
+
+/* =====================================================================
+   INVENTORY – header banner, overview cards, dashboard panels, stock table
+   (class names are prefixed iv- so they cannot clash with other pages)
+   ===================================================================== */
+.iv{display:grid;gap:14px;max-width:1500px;margin:0 auto}
+.iv small{color:var(--mute);font-weight:400}
+.iv-head{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding:18px 20px;border-radius:14px;color:#fff;
+  background:linear-gradient(115deg,var(--pos-bar),#1b4aa3 65%,#2a6bd1);box-shadow:0 4px 16px #0a246440}
+.iv-head h1{margin:0;color:#fff;text-transform:uppercase;letter-spacing:.05em;font-size:clamp(1.1rem,.85rem + 1.4vw,1.6rem)}
+.iv-head p{margin:2px 0 0;opacity:.85;font-size:.9rem}
+.iv-actions{display:flex;flex-wrap:wrap;gap:8px}
+.iv-actions button,.iv-actions .btn{display:inline-flex;align-items:center;text-decoration:none;color:#fff;background:#ffffff1f;border:1px solid #ffffff55;padding:8px 14px;border-radius:8px}
+.iv-actions button:hover,.iv-actions .btn:hover{background:#ffffff33}
+.iv-actions .btn.gold{background:var(--gold);border-color:var(--gold);color:#14213d;font-weight:600}
+
+/* overview cards */
+.iv-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.iv-stat{display:flex;align-items:center;gap:12px;text-align:left;padding:14px;border-radius:12px;border:1px solid var(--line);border-left:4px solid var(--tone);background:var(--card);
+  transition:transform .15s,box-shadow .15s}
+.iv-stat:hover{transform:translateY(-2px);box-shadow:0 6px 16px #0002}
+.iv-stat[aria-pressed=true]{box-shadow:0 0 0 2px var(--tone)}
+.iv-stat .ic{flex:none;display:grid;place-items:center;width:46px;height:46px;border-radius:10px;background:var(--tone);color:#fff}
+.iv-stat .ic svg,.iv-pill svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.iv-stat b{display:block;font-size:clamp(1.4rem,1rem + 1.6vw,2rem);line-height:1.1;font-variant-numeric:tabular-nums}
+.iv-stat small{display:block;line-height:1.3}
+.t-blue{--tone:var(--pos-blue)}.t-green{--tone:var(--pos-green)}.t-amber{--tone:#e59a0b}.t-red{--tone:var(--pos-red)}
+
+/* dashboard panels */
+.iv-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.span2{grid-column:span 2}
+.card.iv-panel{padding:16px;overflow:visible}
+.iv-panel h2{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 10px;margin:0 0 12px;font-size:1rem}
+.iv-panel h2 small{font-size:.75rem;margin-right:auto}
+.iv-panel h2 a{font-size:.85rem;color:var(--pos-blue);text-decoration:none;font-weight:600}
+.iv-panel .empty{padding:20px 8px}
+
+/* bar chart */
+.iv-bars{display:flex;align-items:stretch;gap:10px;height:240px;overflow-x:auto;padding:4px 2px 2px}
+.iv-col{flex:1 0 58px;min-width:58px;display:flex;flex-direction:column;align-items:center;gap:4px}
+.iv-val{font-size:.8rem;font-weight:700;font-variant-numeric:tabular-nums}
+.iv-track{position:relative;flex:1;width:100%;display:flex;align-items:flex-end;justify-content:center;border-bottom:2px solid var(--line)}
+.iv-fill{display:block;width:62%;max-width:44px;min-height:3px;border-radius:6px 6px 0 0;background:var(--pos-green);transform-origin:bottom;animation:iv-grow .7s cubic-bezier(.2,.7,.2,1) both}
+.iv-fill.low{background:var(--gold)}.iv-fill.out{background:var(--pos-red)}
+.iv-min{position:absolute;left:0;right:0;height:0;border-top:2px dashed var(--mute);opacity:.55;text-decoration:none}
+.iv-lab{width:100%;font-size:.72rem;line-height:1.2;color:var(--mute);text-align:center;height:2.4em;overflow:hidden;overflow-wrap:anywhere}
+@keyframes iv-grow{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+
+/* alerts + orders lists */
+.iv-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.iv-list li{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:10px}
+.iv-list .nm{flex:1;min-width:0}.iv-list .nm b{display:block;overflow-wrap:anywhere;line-height:1.25}.iv-list .nm small{display:block;line-height:1.3}
+.iv-list button{padding:5px 10px;font-size:.82rem;flex:none}
+.iv-link{margin-top:10px;width:100%;border-style:dashed;color:var(--pos-blue)}
+
+/* status pills */
+.iv-pill{display:inline-block;padding:2px 10px;border-radius:99px;font-size:.76rem;font-weight:600;white-space:nowrap;background:var(--line);color:var(--ink)}
+.iv-pill.ok{background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok)}
+.iv-pill.low{background:color-mix(in srgb,#e59a0b 22%,transparent);color:var(--warn)}
+.iv-pill.out{background:color-mix(in srgb,var(--danger) 18%,transparent);color:var(--danger)}
+@media(prefers-color-scheme:dark){.iv-pill.low{color:#f6bd4a}}
+
+/* line chart */
+.iv-svg{display:block;width:100%;height:130px;overflow:visible}
+.iv-svg polyline{fill:none;stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.iv-svg .in{stroke:var(--pos-green)}.iv-svg .out{stroke:var(--pos-red)}
+.iv-svg .gl line{stroke:var(--line);stroke-width:1;vector-effect:non-scaling-stroke}
+.iv-days{display:grid;grid-template-columns:repeat(7,1fr);font-size:.7rem;color:var(--mute);text-align:center;margin-top:4px}
+.iv-legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:10px;font-size:.85rem}
+.iv-legend span{display:inline-flex;align-items:center;gap:6px}.iv-legend i{width:10px;height:10px;border-radius:50%;display:inline-block}
+.iv-legend.col{display:grid;list-style:none;padding:0;gap:6px;margin-top:14px}
+.iv-legend.col li{display:flex;justify-content:space-between;gap:10px}
+
+/* donut */
+.iv-donut{position:relative;width:min(160px,60%);aspect-ratio:1;margin:4px auto 0;border-radius:50%;
+  background:conic-gradient(var(--pos-green) 0 calc(var(--a) * 1%),var(--gold) 0 calc(var(--b) * 1%),var(--pos-red) 0)}
+.iv-donut > div{position:absolute;inset:22%;display:grid;place-content:center;text-align:center;border-radius:50%;background:var(--card)}
+.iv-donut b{font-size:1.5rem;line-height:1}
+
+/* table area */
+.iv-tools{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin-bottom:12px}
+.iv-tools input{flex:1 1 220px;max-width:340px}
+.iv-chips{display:flex;flex-wrap:wrap;gap:6px}
+.iv-chips button{border-radius:99px;padding:5px 12px;font-size:.85rem}
+.iv-chips button small{color:inherit;opacity:.7}
+.iv-chips button.on{background:var(--pos-blue);border-color:var(--pos-blue);color:#fff}
+.iv-prod{display:flex;align-items:center;gap:10px;text-align:left}
+.iv-prod b{display:block;font-weight:600;line-height:1.25}.iv-prod small{display:block}
+.iv-meter{height:8px;min-width:80px;border-radius:99px;background:var(--line);overflow:hidden}
+.iv-meter i{display:block;height:100%;border-radius:99px;background:var(--pos-green);transition:width .5s}
+.iv-meter i.low{background:var(--gold)}.iv-meter i.out{background:var(--pos-red)}
+.iv-up{color:var(--ok);font-weight:600}.iv-down{color:var(--danger);font-weight:600}
+.ph.thumb{font-size:.9rem}
+
+/* responsive */
+@media(max-width:1099px){.iv-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:899px){.iv-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:699px){
+  .iv-grid{grid-template-columns:minmax(0,1fr)}.span2{grid-column:auto}
+  .iv-head{padding:14px}.iv-actions{width:100%}.iv-actions > *{flex:1;justify-content:center;text-align:center}
+  .iv-bars{height:210px}
+  .iv-tools input{max-width:none}
+  .iv-chips{width:100%}
+  td .iv-prod{text-align:right;flex-direction:row-reverse}   /* phone cards: name on the right like the other cells */
+  .iv-meter{width:120px}
+}
+@media(max-width:380px){.iv-stat{padding:10px;gap:8px}.iv-stat .ic{width:38px;height:38px}}
+@media(prefers-reduced-motion:reduce){.iv-fill{animation:none}.iv-stat,.iv-meter i{transition:none}}
+
+/* =====================================================================
+   MODULE 5 – DASHBOARD + REPORTS (merged from reports.css)
+   Reuses the iv- pieces above; adds charts, tabs, filters and print styles.
+   Class names start with rp- so they cannot clash with other pages.
+   ===================================================================== */
+
+.rp-dense{grid-auto-flow:dense}
+.rp-sum{margin:0 0 10px}
+.rp-big{font-size:clamp(1.25rem,1rem + 1.3vw,1.8rem);font-weight:700;line-height:1.15;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.rp-note{color:var(--mute);font-size:.85rem;margin:0 0 10px}
+.rp-amt{white-space:nowrap;font-variant-numeric:tabular-nums}
+
+/* KPI cards (the number of columns is set with style="--cols:n") */
+.rp-kpis{display:grid;grid-template-columns:repeat(var(--cols,4),minmax(0,1fr));gap:12px}
+.rp-kpis .iv-stat{min-width:0}
+.rp-kpis .iv-stat > span:last-child{min-width:0}
+.rp-kpis .iv-stat b{font-size:clamp(1.05rem,.75rem + 1.1vw,1.6rem);overflow-wrap:anywhere}
+.rp-kpis .iv-stat:hover{transform:none;box-shadow:none}
+.rp-delta{display:block;font-weight:600}
+.rp-delta.up{color:var(--ok)}.rp-delta.down{color:var(--danger)}
+
+/* open-shift strip on the dashboard */
+.rp-shift{display:flex;flex-wrap:wrap;align-items:center;gap:10px 28px;border-left:4px solid var(--pos-green)}
+.rp-shift > div small{display:block;line-height:1.3}
+.rp-shift .grow{flex:1 1 200px}
+
+/* small period switch inside a panel heading */
+.rp-seg{display:inline-flex;border:1px solid var(--line);border-radius:99px;overflow:hidden;font-weight:400}
+.rp-seg button{border:0;border-radius:0;padding:4px 12px;font-size:.8rem;background:transparent;color:var(--mute)}
+.rp-seg button + button{border-left:1px solid var(--line)}
+.rp-seg button.on{background:var(--pos-blue);color:#fff}
+
+/* bar + line chart */
+.rp-scroll{overflow-x:auto;padding-bottom:4px}
+.rp-chart{--bar:var(--pos-blue)}.rp-chart.green{--bar:var(--pos-green)}
+.rp-plot{position:relative;height:220px;border-bottom:2px solid var(--line)}
+.rp-y{position:absolute;inset:0;pointer-events:none}
+.rp-y span{position:absolute;left:0;right:0;border-top:1px dashed var(--line);font-size:.68rem;line-height:1.2;color:var(--mute);padding-top:1px}
+.rp-y span:nth-child(1){top:0}.rp-y span:nth-child(2){top:50%}
+.rp-bars{position:absolute;inset:0;display:flex}
+.rp-col{flex:1;min-width:0;height:100%;display:flex;align-items:flex-end;justify-content:center}
+.rp-col i{display:block;width:58%;max-width:38px;border-radius:6px 6px 0 0;transform-origin:bottom;
+  background:linear-gradient(180deg,color-mix(in srgb,var(--bar) 80%,#fff),var(--bar));animation:iv-grow .7s cubic-bezier(.2,.7,.2,1) both}
+.rp-col:hover i{filter:brightness(1.18)}
+.rp-line{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}
+.rp-line polyline{fill:none;stroke:var(--gold);stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.rp-x{display:grid;margin-top:6px;font-size:.7rem;color:var(--mute);text-align:center}
+.rp-x span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* horizontal bars */
+.rp-hb{list-style:none;margin:0;padding:0;display:grid;gap:11px}
+.rp-hb li{display:grid;grid-template-columns:minmax(70px,.9fr) minmax(0,1.6fr) auto;gap:10px;align-items:center;font-size:.88rem}
+.rp-hb .l{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rp-hb .t{height:10px;border-radius:99px;background:var(--line);overflow:hidden}
+.rp-hb .t i{display:block;height:100%;border-radius:99px;background:var(--pos-blue);transition:width .5s}
+.rp-hb .t i.ok{background:var(--pos-green)}.rp-hb .t i.low{background:var(--gold)}.rp-hb .t i.out{background:var(--pos-red)}
+.rp-hb b{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+@media(max-width:420px){.rp-hb li{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"l b" "t t"}.rp-hb .l{grid-area:l}.rp-hb .t{grid-area:t}.rp-hb b{grid-area:b}}
+
+/* donut with any number of slices (the colours are set in analytics.js) */
+.rp-donut{position:relative;width:min(170px,62%);aspect-ratio:1;margin:4px auto 0;border-radius:50%}
+.rp-donut > div{position:absolute;inset:22%;display:grid;place-content:center;text-align:center;border-radius:50%;background:var(--card);overflow:hidden}
+.rp-donut b{font-size:1.05rem;line-height:1.15}
+
+/* ranked list + definition list */
+.rp-rank{flex:none;display:grid;place-items:center;width:26px;height:26px;border-radius:50%;background:var(--pos-blue);color:#fff;font-size:.78rem;font-weight:700}
+.rp-dl{margin:0;display:grid;gap:8px}
+.rp-dl div{display:flex;justify-content:space-between;gap:10px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+.rp-dl dt{color:var(--mute)}.rp-dl dd{margin:0;font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
+
+/* totals row inside tables */
+.rp-total td{font-weight:700;background:color-mix(in srgb,var(--pos-blue) 8%,transparent)}
+.card.iv-panel:has(> table){overflow-x:auto}
+
+/* Reports: filters and tabs */
+.rp-filters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px 12px;align-items:end}
+.rp-filters label{margin:0}
+.rp-presets{grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+.rp-presets button{border-radius:99px;padding:5px 14px;font-size:.85rem}
+.rp-presets button:hover{border-color:var(--pos-blue);color:var(--pos-blue)}
+.rp-tabs{display:flex;gap:4px;overflow-x:auto;scrollbar-width:thin;border-bottom:2px solid var(--line)}
+.rp-tabs button{flex:none;border:0;border-bottom:3px solid transparent;border-radius:8px 8px 0 0;margin-bottom:-2px;padding:10px 16px;background:transparent;font-weight:600;color:var(--mute);white-space:nowrap}
+.rp-tabs button.on{color:var(--pos-blue);border-bottom-color:var(--pos-blue);background:color-mix(in srgb,var(--pos-blue) 8%,transparent)}
+.rp-printmeta{display:none;margin:0;font-size:.85rem}
+#view{display:grid;gap:14px}
+
+/* responsive */
+@media(max-width:899px){.rp-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.rp-filters{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:720px){
+  .card.iv-panel:has(> table){padding:0}
+  .card.iv-panel:has(> table) > h2{padding:0 2px}
+  .rp-plot{height:190px}
+}
+@media(max-width:420px){.rp-filters{grid-template-columns:minmax(0,1fr)}.rp-tabs button{padding:10px 12px}}
+@media(prefers-reduced-motion:reduce){.rp-col i{animation:none}.rp-hb .t i{transition:none}}
+
+/* Print / Save as PDF (Reports page only; receipts keep their own 80mm rules from main.css) */
+@page report{size:A4;margin:12mm}
+@media print{
+  body:has(.rp-report) *{visibility:visible}
+  body:has(.rp-report) #nav,.rp-noprint{display:none!important}
+  body:has(.rp-report),body:has(.rp-report) main{background:#fff!important;padding:0!important;color:#000}
+  .rp-report{page:report}
+  .rp-report .iv-head{background:#fff!important;color:#000!important;box-shadow:none;padding:0 0 8px;border-bottom:2px solid #000;border-radius:0}
+  .rp-report .iv-head h1,.rp-report .iv-head p{color:#000!important}
+  .rp-printmeta{display:block;color:#000}
+  .rp-report .card{break-inside:avoid;box-shadow:none;border-color:#bbb}
+  .rp-report .iv-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .rp-report .rp-col i,.rp-report .rp-hb .t i,.rp-report .iv-pill,.rp-report .rp-donut,.rp-report .iv-stat .ic,.rp-report .rp-total td{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
