@@ -21,3 +21,35 @@ function refund(s) {
   $('#ok', d).onclick = async () => { try { await API.refund(s.id, { reason: $('#why', d).value.trim(), items: qs().map(({ productId, quantity }) => ({ productId, quantity })) });
     d.close(); toast('Refund recorded'); load(); } catch (e) { toast(e.message, true); } };
 }
+/* DEMO ONLY. 
+   Safe to */
+   (() => {
+    const KEY = 'pos_db', d = JSON.parse(localStorage.getItem(KEY) || 'null');
+    if (!d) return alert('Open the app once first so the demo database exists.');
+    const rnd = (a, b) => Math.floor(Math.random() * (b - a + 1)) + a, pick = a => a[rnd(0, a.length - 1)];
+    const cashiers = ['Otieno (Cashier)', 'Wanjiku (Manager)'], methods = ['CASH', 'MPESA', 'MPESA', 'CARD'], now = new Date();
+    d.sales = d.sales.filter(s => !s.demo); d.shifts = (d.shifts || []).filter(s => !s.demo);
+    for (let i = 89; i >= 0; i--) {
+      const day = new Date(); day.setDate(day.getDate() - i);
+      const n = rnd(4, 12) + (i < 30 ? 3 : 0);
+      for (let k = 0; k < n; k++) {
+        const t = new Date(day); t.setHours(rnd(8, 19), rnd(0, 59), rnd(0, 59), 0); if (t > now) continue;
+        const items = [...Array(rnd(1, 4))].map(() => { const p = pick(d.products), q = rnd(1, 4), lt = p.price * q;
+          return { productId: p.id, name: p.name, quantity: q, unitPrice: p.price, unitCost: p.cost, taxAmount: Math.round(lt * p.taxRate / (100 + p.taxRate)), lineTotal: lt }; });
+        const total = items.reduce((a, l) => a + l.lineTotal, 0), tax = items.reduce((a, l) => a + l.taxAmount, 0), m = pick(methods);
+        const sale = { id: crypto.randomUUID(), receiptNumber: 'R-' + (++d.seq), items, subtotal: total - tax, discountTotal: 0, taxTotal: tax, grandTotal: total, tendered: total, change: 0,
+          customerId: null, customerName: '', payments: [m === 'CASH' ? { method: m, amount: total } : { method: m, amount: total, reference: 'DEMO' + rnd(1000, 9999) }], method: m,
+          cashier: pick(cashiers), status: 'COMPLETED', createdAt: t.toISOString(), branchId: Math.random() < .7 ? 'branch-1' : 'branch-2', demo: true };
+        if (Math.random() < .04) { const l = items[0]; l.refundedQty = 1; sale.refundTotal = Math.round(l.lineTotal / l.quantity); sale.status = items.length === 1 && l.quantity === 1 ? 'REFUNDED' : 'PARTIALLY_REFUNDED'; }
+        d.sales.push(sale);
+      }
+    }
+    d.sales.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    for (let i = 14; i >= 1; i--) {
+      const o = new Date(); o.setDate(o.getDate() - i); o.setHours(8, 0, 0, 0); const c = new Date(o); c.setHours(20, 0, 0, 0);
+      const cash = d.sales.filter(s => s.createdAt >= o.toISOString() && s.createdAt <= c.toISOString()).reduce((a, s) => a + s.payments.filter(p => p.method === 'CASH').reduce((t, p) => t + p.amount, 0), 0);
+      const expected = 500000 + cash, diff = pick([0, 0, 0, -5000, 2000]);
+      d.shifts.push({ id: crypto.randomUUID(), cashier: pick(cashiers), openingCash: 500000, openedAt: o.toISOString(), closedAt: c.toISOString(), expected, counted: expected + diff, difference: diff, demo: true });
+    }
+    localStorage.setItem(KEY, JSON.stringify(d)); alert('Demo data added: ' + d.sales.filter(s => s.demo).length + ' sales. The page will reload.'); location.reload();
+  })();
