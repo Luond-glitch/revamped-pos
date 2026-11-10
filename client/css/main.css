@@ -1,5 +1,5 @@
 /* Universal POS: responsive stylesheet. Phone first, then tablet (900px), then desktop POS layout (1000px). */
-:root{--ink:#1c2333;--paper:#faf7f2;--card:#fff;--line:#e9e3d8;--mute:#6b7385;--accent:#0f7b5f;--accent-ink:#fff;--gold:#f0a91d;--warn:#b45309;--danger:#b42318;--ok:#18794e;--nav:#14213d;--r:10px;--navw:208px;--pad:clamp(14px,3vw,26px)
+:root{--ink:#1c2333;--paper:#faf7f2;--card:#fff;--line:#e9e3d8;--mute:#6b7385;--accent:#0f7b5f;--accent-ink:#fff;--gold:#f0a91d;--warn:#b45309;--danger:#b42318;--ok:#18794e;--nav:#14213d;--r:10px;--navw:208px;--pad:clamp(14px,3vw,26px);
   /* Checkout (POS) palette, modelled on the proposal screens */
   --pos-bar:#0a2463;--pos-blue:#1f5fd0;--pos-blue-d:#133f94;--pos-green:#1f9d55;--pos-red:#c62828}
 @media(prefers-color-scheme:dark){:root{--ink:#ecebe6;--paper:#0e141f;--card:#17202f;--line:#27324a;--mute:#9aa3b8;--accent:#34d399;--accent-ink:#04231a;--gold:#f6bd4a;--warn:#f0a050;--danger:#ff8a80;--ok:#5fd39b;--nav:#0a0f1a}}
@@ -509,3 +509,112 @@ td input.stmt{width:150px;min-height:0;padding:6px 8px}
 .pm-sum small{display:block}.pm-sum b{font-variant-numeric:tabular-nums}
 @media(max-width:480px){.pm-sum{grid-template-columns:minmax(0,1fr)}}
 @media print{.pm-bar button,td button{display:none!important}}
+
+/* =====================================================================
+   MODULE 6 – STAFF & ACCESS ("Privilege Access Management" screen from the proposal)
+   Navy header band, navy side menu, white tiles with green ticks and red crosses.
+   Class names start with st- so they cannot clash with other pages.
+   ===================================================================== */
+.st [hidden]{display:none!important}
+.st{max-width:1500px;margin:0 auto}
+.st-frame{border-radius:14px;overflow:hidden;border:1px solid var(--line);box-shadow:0 8px 24px #0a246426;background:var(--paper)}
+.st-hero{display:flex;flex-wrap:wrap;align-items:center;gap:8px 22px;padding:18px 22px;color:#fff;background:linear-gradient(100deg,var(--pos-bar),#1b4aa3 62%,#2a6bd1)}
+.st-brand{font-size:clamp(1.4rem,1rem + 2vw,2.3rem);font-weight:700;letter-spacing:-.01em;line-height:1.1}
+.st-hero h1{flex:1 1 220px;margin:0;color:#fff;font-weight:500;font-size:clamp(1.05rem,.8rem + 1.2vw,1.7rem)}
+.st-badge{padding:4px 12px;border-radius:99px;background:var(--gold);color:#14213d;font-weight:700;font-size:.78rem;white-space:nowrap}
+.st-shell{display:grid;grid-template-columns:212px minmax(0,1fr);align-items:stretch}
+.st-side{background:linear-gradient(180deg,#143f98,var(--pos-bar));padding:14px 0}
+#tabs.st-tabs,.st-side #tabs{display:flex;flex-direction:column;gap:2px}
+.st-side #tabs button{display:flex;align-items:center;gap:14px;width:100%;text-align:left;border:0;border-radius:0;background:transparent;color:#e8eefc;padding:13px 20px;font-weight:500;white-space:nowrap}
+.st-side #tabs button:hover{background:#ffffff14}
+.st-side #tabs button.on{background:#ffffff22;color:#fff;font-weight:700;box-shadow:inset 4px 0 0 var(--gold)}
+.st-side #tabs svg{flex:none;width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.st-main{min-width:0;padding:16px}
+.st-main #view{display:grid;grid-template-columns:minmax(0,1fr);gap:14px}.st-main .card{min-width:0}
+.st-link{margin-left:auto;border:0;background:none;padding:0;color:var(--pos-blue);font-weight:600;font-size:.85rem}.st-link:hover{text-decoration:underline;border:0}
+
+.st-filters{grid-template-columns:repeat(4,minmax(0,1fr))}
+.st-filters:has(> label:nth-child(3):last-child){grid-template-columns:repeat(3,minmax(0,1fr))}
+.st-end{display:flex;align-items:flex-end;justify-content:flex-end;gap:8px;grid-column:-2 / -1}
+.st-end button{width:100%}
+.st-who{display:flex;align-items:center;gap:10px;min-width:0;text-align:left}
+.st-who span:last-child{min-width:0}.st-who b,.st-who small{display:block;overflow-wrap:anywhere;line-height:1.3}.st-who small{color:var(--mute);font-weight:400}
+.st-av{flex:none;display:grid;place-items:center;width:38px;height:38px;border-radius:50%;color:#fff;font-size:.8rem;font-weight:700;letter-spacing:.02em}
+.st-act{white-space:nowrap}.st-act button{padding:5px 12px;font-size:.84rem;margin-left:6px}.st-act small{color:var(--mute)}
+.st-off .st-who,.st-off td:nth-child(3),.st-off td:nth-child(4){opacity:.55}
+.st-role-super_admin{background:var(--gold);color:#14213d;font-weight:700}
+.st-role-administrator{background:color-mix(in srgb,var(--pos-bar) 16%,transparent);color:var(--pos-blue-d)}
+.st-role-manager{background:color-mix(in srgb,var(--pos-blue) 16%,transparent);color:var(--pos-blue)}
+.st-role-cashier{background:color-mix(in srgb,var(--pos-green) 18%,transparent);color:var(--ok)}
+.st-role-stock_controller{background:color-mix(in srgb,#7c3aed 16%,transparent);color:#6d28d9}
+@media(prefers-color-scheme:dark){.st-role-administrator,.st-role-manager{color:#9db8f2}.st-role-stock_controller{color:#c4a8ff}}
+
+/* dashboard tab: people per role */
+.st-roles{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
+.st-role{display:grid;gap:2px;justify-items:start;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--card);box-shadow:0 2px 6px #0a246410}
+.st-role b{font-size:1.7rem;line-height:1.1}.st-role small{color:var(--mute)}
+
+/* roles tab: one card per job */
+.st-rolecards{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+.st-rc{display:flex;flex-direction:column;gap:10px;overflow:visible;border-top:4px solid var(--pos-blue)}
+.st-rc header{display:flex;align-items:center;gap:12px}.st-rc header b{display:block;font-size:1.05rem}.st-rc header small{color:var(--mute)}
+.st-rc p{margin:0;color:var(--mute)}.st-rc button{margin-top:auto;align-self:flex-start;border-color:var(--pos-blue);color:var(--pos-blue)}
+.st-rcic{flex:none;display:grid;place-items:center;width:42px;height:42px;border-radius:50%;background:var(--pos-blue);color:#fff}
+.st-rcic svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.st-rc-super_admin{border-top-color:var(--gold)}.st-rc-super_admin .st-rcic{background:var(--gold);color:#14213d}
+.st-rc-administrator{border-top-color:var(--pos-bar)}.st-rc-administrator .st-rcic{background:var(--pos-bar)}
+.st-rc-cashier{border-top-color:var(--pos-green)}.st-rc-cashier .st-rcic{background:var(--pos-green)}
+.st-rc-stock_controller{border-top-color:#7c3aed}.st-rc-stock_controller .st-rcic{background:#7c3aed}
+.st-ppl{display:flex;flex-wrap:wrap;gap:6px}
+.st-chip{display:inline-flex;align-items:center;gap:6px;padding:2px 10px 2px 2px;border-radius:99px;border:1px solid var(--line);font-size:.82rem}
+.st-chip .st-av{width:24px;height:24px;font-size:.62rem}
+
+/* permissions tab: the proposal's grid of white tiles with green ticks and red crosses */
+.st-scroll{overflow-x:auto;padding:4px 2px 8px;margin:0 -2px}
+.st-grid{display:grid;grid-template-columns:minmax(170px,1.5fr) repeat(var(--n,4),minmax(108px,1fr));gap:8px;min-width:calc(170px + var(--n,4) * 116px)}
+.st-hd{align-self:end;text-align:center;font-weight:700;font-size:clamp(.85rem,.74rem + .4vw,1.1rem);line-height:1.2;padding:8px 2px;overflow-wrap:anywhere;hyphens:auto}
+.st-grow{grid-column:1 / -1;margin-top:4px;padding:6px 12px;border-radius:8px;color:#fff;font-weight:700;font-size:.78rem;text-transform:uppercase;letter-spacing:.06em;background:linear-gradient(100deg,var(--pos-bar),#1b4aa3)}
+.st-cell{display:flex;align-items:center;gap:8px;min-height:54px;padding:8px 12px;border-radius:10px;background:var(--card);border:1px solid var(--line);box-shadow:0 2px 6px #0a246414;color:var(--ink);font:inherit;text-align:left}
+.st-lab{position:sticky;left:0;z-index:1;font-weight:600;line-height:1.25}
+.st-tick{justify-content:center;text-align:center}
+.st-tick svg{flex:none;width:26px;height:26px;padding:5px;border-radius:50%;color:#fff;fill:none;stroke:currentColor;stroke-width:3.2;stroke-linecap:round;stroke-linejoin:round}
+.st-tick.yes svg{background:var(--pos-green)}.st-tick.no svg{background:var(--pos-red)}
+.st-tick b{font-size:.78rem;font-weight:600;color:var(--mute)}
+button.st-tick{cursor:pointer;transition:transform .12s,border-color .12s,box-shadow .12s}
+button.st-tick:hover{transform:translateY(-1px);border-color:var(--pos-blue);box-shadow:0 4px 10px #0a246426}
+.st-tick.lock{background:color-mix(in srgb,var(--card) 92%,var(--pos-blue))}
+.st-savebar{position:sticky;bottom:0;display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:10px;margin-top:10px;padding:10px 12px;border-radius:10px;background:var(--card);border:1px solid var(--pos-blue);box-shadow:0 -4px 14px #0a246422}
+.st-savebar:empty{display:none}.st-savebar span{margin-right:auto;font-weight:600}
+.st-notes{margin:0;padding-left:18px;display:grid;gap:8px;color:var(--mute)}
+
+/* add / edit dialog */
+dialog:has(.st-form){width:min(560px,calc(100vw - 24px))}
+.st-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 12px}
+.st-form .w2{grid-column:1 / -1}.st-form .rp-note{margin:-4px 0 10px}
+
+/* nav: role under the name */
+#nav .who small{display:block;opacity:.7;font-size:.78rem}
+
+/* responsive: the side menu becomes a scrolling row above the content */
+@media(max-width:899px){
+  .st-shell{grid-template-columns:minmax(0,1fr)}
+  .st-side{padding:0}
+  .st-side #tabs{flex-direction:row;overflow-x:auto;scrollbar-width:none}.st-side #tabs::-webkit-scrollbar{display:none}
+  .st-side #tabs button{flex:none;width:auto;gap:8px;padding:13px 16px}
+  .st-side #tabs button.on{box-shadow:inset 0 -4px 0 var(--gold)}
+  .st-filters,.st-filters:has(> label:nth-child(3):last-child){grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:720px){
+  .st-hero{padding:14px 16px}.st-main{padding:12px}
+  .st-act{justify-content:flex-end;flex-wrap:wrap}.st-act button{margin:0 0 0 6px}
+  .st-savebar{bottom:calc(8px + env(safe-area-inset-bottom))}.st-savebar button{flex:1}.st-savebar span{flex:1 0 100%}
+  .st-grid{grid-template-columns:minmax(138px,1.3fr) repeat(var(--n,4),minmax(92px,1fr));min-width:calc(138px + var(--n,4) * 100px)}
+  .st-tick b{display:none}.st-cell{min-height:50px;padding:8px}
+  .st-hd{font-size:.74rem;overflow-wrap:normal;hyphens:none}
+}
+@media(max-width:520px){
+  .st-form{grid-template-columns:minmax(0,1fr)}
+  .st-filters,.st-filters:has(> label:nth-child(3):last-child){grid-template-columns:minmax(0,1fr)}.st-end{grid-column:auto}
+  .st-hero .iv-actions{width:100%}.st-hero .iv-actions > *{flex:1}
+}
+@media(prefers-reduced-motion:reduce){button.st-tick{transition:none}}

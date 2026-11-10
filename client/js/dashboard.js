@@ -2,7 +2,7 @@ const RANGES = { day: ['7 days', 'last 7 days'], week: ['8 weeks', 'last 8 weeks
 let mode = 'day', D = null, mgr = false;
 
 boot('dashboard').then(user => {
-  mgr = user.role === 'manager';
+  mgr = can(user, 'reports.view');
   $('#today').textContent = new Date().toLocaleDateString('en-KE', { dateStyle: 'full' }) + ' · Welcome, ' + user.name;
   if (mgr) $('#go').innerHTML = '<a class="btn gold" href="reports.html">Full reports</a><a class="btn" href="inventory.html">Inventory</a>';
   else $('#profitbox').remove();                                   // cost and profit figures are for managers only

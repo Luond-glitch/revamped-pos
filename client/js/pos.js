@@ -42,7 +42,7 @@ boot('pos').then(async user => {
 function drawActions(user) {
   const html = [['disc', 'tag', 'Discount'], ['cust', 'user', 'Client'], ['find', 'search', 'Search']]
     .map(([k, i, l]) => `<button class="act" type="button" data-act="${k}">${ico(i)}<span>${l}</span></button>`);
-  if (user.role === 'manager') html.push(`<a class="act" href="sales.html">${ico('clock')}<span>History / Refund</span></a>`);
+  if (can(user, 'sales.view')) html.push(`<a class="act" href="sales.html">${ico('clock')}<span>History / Refund</span></a>`);
   SOON.forEach(([i, l]) => html.push(`<button class="act" type="button" disabled title="Coming soon">${ico(i)}<span>${l}</span></button>`));
   $('#acts').innerHTML = html.join('');
   $('#acts').onclick = e => { const b = e.target.closest('[data-act]'); if (!b) return;

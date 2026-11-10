@@ -5,10 +5,14 @@ const toCents = v => Math.round(parseFloat(v || 0) * 100);
 const net = s => s.grandTotal - (s.refundTotal || 0);
 const when = iso => new Date(iso).toLocaleString('en-KE', { dateStyle: 'medium', timeStyle: 'short' });
 
+// [page, label, permission needed to see it]. The server checks permissions again on every request: hiding a link is only a convenience.
 const NAV = [
-  ['dashboard', 'Dashboard', ['manager', 'cashier']], ['pos', 'Checkout', ['manager', 'cashier']],
-  ['sales', 'Sales', ['manager']], ['products', 'Products', ['manager']], ['inventory', 'Inventory', ['manager']], ['purchases', 'Purchases', ['manager']], ['reports', 'Reports', ['manager']], ['customers', 'Clients', ['manager']], ['users', 'Staff', ['manager']],
+  ['dashboard', 'Dashboard', 'dashboard.view'], ['pos', 'Checkout', 'pos.use'], ['sales', 'Sales', 'sales.view'], ['products', 'Products', 'products.manage'],
+  ['inventory', 'Inventory', 'inventory.manage'], ['purchases', 'Purchases', 'purchases.manage'], ['reports', 'Reports', 'reports.view'],
+  ['customers', 'Clients', 'customers.manage'], ['users', 'Staff', 'users.view'],
 ];
+const can = (u, p) => !!u && (u.permissions || []).includes(p);
+const ROLE_LABEL = { super_admin: 'Super administrator', administrator: 'Administrator', manager: 'Manager', cashier: 'Cashier', stock_controller: 'Stock controller' };
 
 function toast(msg, err) {
   let box = $('#toasts') || document.body.appendChild(Object.assign(document.createElement('div'), { id: 'toasts' }));
@@ -25,15 +29,17 @@ function modal(html) {
 async function boot(page) {
   let user;
   try { user = await API.me(); } catch { location.href = 'login.html'; return new Promise(() => {}); }
-  const links = NAV.filter(n => n[2].includes(user.role)).map(([id, label]) => `<a href="${id}.html" class="${id === page ? 'on' : ''}">${label}</a>`).join('');
+  const links = NAV.filter(n => can(user, n[2])).map(([id, label]) => `<a href="${id}.html" class="${id === page ? 'on' : ''}">${label}</a>`).join('');
   // .clock is only visible on the Checkout page (see main.css); the nav becomes a top bar there.
-  $('#nav').innerHTML = `<div class="top"><span class="brand">Universal POS</span><span class="clock" id="clock" aria-hidden="true"></span><button id="menu" aria-expanded="false" aria-controls="navlinks" aria-label="Open menu">☰</button></div><div id="navlinks">${links}<div class="who"><span>${esc(user.name)}</span><button id="logout">Sign out</button></div></div>`;
+  $('#nav').innerHTML = `<div class="top"><span class="brand">Universal POS</span><span class="clock" id="clock" aria-hidden="true"></span><button id="menu" aria-expanded="false" aria-controls="navlinks" aria-label="Open menu">☰</button></div><div id="navlinks">${links}<div class="who"><span>${esc(user.name)}<small>${esc(ROLE_LABEL[user.role] || user.role)}</small></span><button id="logout">Sign out</button></div></div>`;
   const tick = () => { const n = new Date(); $('#clock').textContent = n.toLocaleDateString('en-KE', { weekday: 'short', day: 'numeric', month: 'short' }) + ' · ' + n.toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit', hour12: false }); };
   tick(); setInterval(tick, 15000);
   $('#logout').onclick = async () => { await API.logout(); location.href = 'login.html'; };
   const setMenu = open => { $('#nav').classList.toggle('open', open); const m = $('#menu'); m.setAttribute('aria-expanded', open); m.setAttribute('aria-label', open ? 'Close menu' : 'Open menu'); m.textContent = open ? '✕' : '☰'; };
   $('#menu').onclick = () => setMenu(!$('#nav').classList.contains('open')); document.addEventListener('keydown', e => { if (e.key === 'Escape') setMenu(false); });
-  if (!NAV.find(n => n[0] === page)?.[2].includes(user.role)) { location.href = 'dashboard.html'; return new Promise(() => {}); }
+  const here = NAV.find(n => n[0] === page);
+  if (here && !can(user, here[2])) { // no access: go to the first page this person may use, or back to sign-in
+    const first = NAV.find(n => can(user, n[2])); location.href = first && first[0] !== page ? first[0] + '.html' : 'login.html'; return new Promise(() => {}); }
   return user;
 }
 

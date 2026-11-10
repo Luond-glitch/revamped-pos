@@ -1,3 +1,15 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#14213d">
-<title>Staff · Universal POS</title><link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/main.css"></head><body><nav id="nav"></nav><main><div class="row"><div class="grow"><h1>Staff</h1><p class="sub">People who can sign in at the staff page.</p></div><button class="primary" id="add">Add staff member</button></div><div class="card"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody id="rows"></tbody></table></div></main><script src="js/api.js"></script><script src="js/app.js"></script><script src="js/users.js"></script></body></html>
+    <title>Staff and access · Universal POS</title><link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/main.css"></head><body><nav id="nav"></nav><main>
+    <div class="st">
+      <div class="st-frame">
+        <header class="st-hero"><span class="st-brand">Universal POS</span><h1>Privilege Access Management</h1>
+          <span class="st-badge" id="mode" hidden>Super administrator mode</span>
+          <div class="iv-actions"><button type="button" id="add" class="btn gold" hidden>+ Add staff</button></div></header>
+        <div class="st-shell">
+          <aside class="st-side"><div id="tabs" role="tablist" aria-label="Staff and access sections"></div></aside>
+          <div class="st-main"><div id="view"></div></div>
+        </div>
+      </div>
+    </div>
+    </main><script src="js/api.js"></script><script src="js/app.js"></script><script src="js/analytics.js"></script><script src="js/users.js"></script></body></html>
