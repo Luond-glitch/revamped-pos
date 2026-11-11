@@ -1,5 +1,4 @@
-/* Shared reporting helpers for the Dashboard and Reports pages. Money is in cents, like the rest of the app.
-   Load after api.js and app.js. */
+/* Shared reporting helpers for the Dashboard and Reports pages */
 
    const IC = {
     dollar: '<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
@@ -12,7 +11,7 @@
   };
   const ico = n => `<svg viewBox="0 0 24 24" aria-hidden="true">${IC[n]}</svg>`;
   
-  /* ---------- small helpers ---------- */
+  /*  small helpers  */
   const kes = c => { const v = c / 100, a = Math.abs(v); return a >= 1e6 ? (v / 1e6).toFixed(1) + 'M' : a >= 1e3 ? (v / 1e3).toFixed(a >= 1e4 ? 0 : 1) + 'K' : String(Math.round(v)); };
   const money = c => (c / 100).toFixed(2);                                    // plain number for CSV files
   const dkey = d => new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10);   // YYYY-MM-DD, local time
@@ -23,13 +22,13 @@
   const inRange = (list, a, b) => list.filter(s => { const t = new Date(s.createdAt); return t >= a && t <= b; });
   const lvl = p => p.stock <= 0 ? 'out' : p.stock <= p.reorder ? 'low' : 'ok';
   const METHOD_LABEL = { CASH: 'Cash', MPESA: 'M-Pesa', CARD: 'Card', BANK: 'Bank transfer', CREDIT: 'Pay later', SPLIT: 'Split' };
-  const BRANCHES = { 'branch-1': 'Main branch' };                              // add friendly names here, e.g. 'branch-2': 'Westlands'
+  const BRANCHES = { 'branch-1': 'Main branch' };                              
   const branchOf = s => s.branchId || CONFIG.BRANCH_ID;
   const branchName = id => BRANCHES[id] || id;
   const costMap = products => new Map(products.map(p => [p.id, p.cost || 0]));
   const cashIn = s => (s.payments || [{ method: s.method, amount: s.grandTotal }]).filter(p => p.method === 'CASH').reduce((t, p) => t + p.amount, 0);
   
-  /* ---------- money maths ---------- */
+  /* money maths */
   // Revenue, VAT, cost of goods and profit of ONE sale, after refunds. Profit = net sales - VAT - cost of goods sold.
   function figures(s, cost) {
     let tax = 0, cogs = 0, units = 0;
@@ -57,11 +56,11 @@
     return Object.entries(m).map(([k, value]) => ({ label: METHOD_LABEL[k] || k, value })).sort((a, b) => b.value - a.value);
   }
   
-  /* ---------- daily / weekly / monthly / annual buckets ---------- */
+  /* daily / weekly / monthly / annual buckets  */
   const MODES = { day: 'Daily', week: 'Weekly', month: 'Monthly', year: 'Annual' };
   function buckets(from, to, mode) {
     const out = []; let c = dayStart(from);
-    if (mode === 'week') c = addDays(c, -((c.getDay() + 6) % 7));              // weeks start on Monday
+    if (mode === 'week') c = addDays(c, -((c.getDay() + 6) % 7));              
     if (mode === 'month') c = new Date(c.getFullYear(), c.getMonth(), 1);
     if (mode === 'year') c = new Date(c.getFullYear(), 0, 1);
     const f = (d, o) => d.toLocaleDateString('en-KE', o);
@@ -83,7 +82,7 @@
     return b;
   }
   
-  /* ---------- charts (plain HTML/SVG, no library) ---------- */
+  /* charts (plain HTML/SVG, no library)  */
   // Bars = net sales (or profit), line = gross profit. Scrolls sideways when there are many periods.
   function comboChart(b, o = {}) {
     const key = o.bar || 'rev', line = o.line !== false && key === 'rev', n = b.length, label = key === 'rev' ? 'Net sales' : 'Gross profit';
@@ -111,7 +110,7 @@
     <ul class="iv-legend col">${items.map((i, k) => `<li><span><i style="background:${PALETTE[k % 6]}"></i>${esc(i.label)}</span><b>${valFmt(i.value)} <small>(${pct(i.value, tot)}%)</small></b></li>`).join('')}</ul>`;
   }
   
-  /* ---------- cards, tables, files ---------- */
+  /*  cards, tables, files  */
   const delta = (cur, prev, word) => { if (!prev) return `<small>${cur ? 'No sales ' + word : 'Nothing yet'}</small>`;
     const p = Math.round((cur - prev) / prev * 100); return `<small class="rp-delta ${p >= 0 ? 'up' : 'down'}">${p >= 0 ? '▲' : '▼'} ${Math.abs(p)}% vs ${word}</small>`; };
   const statCard = (tone, icon, label, value, sub) => `<div class="iv-stat t-${tone}"><span class="ic">${ico(icon)}</span><span><small>${label}</small><b>${value}</b>${String(sub).startsWith('<') ? sub : `<small>${sub}</small>`}</span></div>`;

@@ -49,7 +49,7 @@ label{display:block;font-size:.85rem;color:var(--mute);margin-bottom:10px}label 
 .ph{display:grid;place-items:center;font-weight:700;color:#fff;border-radius:8px;flex-shrink:0;letter-spacing:.5px}.ph.pic{font-size:1.6rem}
 .price{font-weight:700;color:var(--accent)}
 
-/* ---------- Sign-in pages (responsive) ---------- */
+/*  Sign-in pages (responsive) */
 
 /* Staff sign-in (login.html): the page body is just the form, so :has() scopes these rules to that page only */
 body:has(> form#f){display:flex;align-items:center;justify-content:center;min-height:100vh;min-height:100dvh;
@@ -103,12 +103,12 @@ dialog::backdrop{background:#0008}dialog .actions{display:flex;flex-wrap:wrap;ga
 .line{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
 .total{font-size:1.3rem;font-weight:700;display:flex;justify-content:space-between;margin:8px 0}
 
-/* =====================================================================
+/*
    CHECKOUT (POS) – layout modelled on the proposal:
    top bar · product panel (search, tabs, blue tiles) · sale panel (cart table, client/discount,
    quick actions, totals, Cancel Sale / Payment).
    Phones & tablets: products first, sale panel is a bottom sheet. 1000px+: two columns.
-   ===================================================================== */
+    */
 main:has(.pos){padding:10px 10px 0;display:flex;flex-direction:column}
 .pos{flex:1;display:block;padding-bottom:182px}
 .pos .left{display:flex;flex-direction:column;gap:10px;min-width:0}
@@ -380,17 +380,17 @@ html:has(.hero){background:#14213d} /* no cream strip showing when a phone over-
   .iv-bars{height:210px}
   .iv-tools input{max-width:none}
   .iv-chips{width:100%}
-  td .iv-prod{text-align:right;flex-direction:row-reverse}   /* phone cards: name on the right like the other cells */
+  td .iv-prod{text-align:right;flex-direction:row-reverse}   
   .iv-meter{width:120px}
 }
 @media(max-width:380px){.iv-stat{padding:10px;gap:8px}.iv-stat .ic{width:38px;height:38px}}
 @media(prefers-reduced-motion:reduce){.iv-fill{animation:none}.iv-stat,.iv-meter i{transition:none}}
 
-/* =====================================================================
+/* 
    MODULE 5 – DASHBOARD + REPORTS (merged from reports.css)
    Reuses the iv- pieces above; adds charts, tabs, filters and print styles.
    Class names start with rp- so they cannot clash with other pages.
-   ===================================================================== */
+*/
 
 .rp-dense{grid-auto-flow:dense}
 .rp-sum{margin:0 0 10px}
@@ -512,11 +512,11 @@ td input.stmt{width:150px;min-height:0;padding:6px 8px}
 @media(max-width:480px){.pm-sum{grid-template-columns:minmax(0,1fr)}}
 @media print{.pm-bar button,td button{display:none!important}}
 
-/* =====================================================================
+/* 
    MODULE 6 – STAFF & ACCESS ("Privilege Access Management" screen from the proposal)
    Navy header band, navy side menu, white tiles with green ticks and red crosses.
    Class names start with st- so they cannot clash with other pages.
-   ===================================================================== */
+   */
 .st [hidden]{display:none!important}
 .st{max-width:1500px;margin:0 auto}
 .st-frame{border-radius:14px;overflow:hidden;border:1px solid var(--line);box-shadow:0 8px 24px #0a246426;background:var(--paper)}
@@ -621,11 +621,11 @@ dialog:has(.st-form){width:min(560px,calc(100vw - 24px))}
   .st-hero .iv-actions{width:100%}.st-hero .iv-actions > *{flex:1}
 }
 @media(prefers-reduced-motion:reduce){button.st-tick{transition:none}}
-/* =====================================================================
+/* 
    MODULE 3 – PAYMENTS & FINANCE (dashboard layout from the proposal)
    Navy side menu with a gold active item, white top bar, navy and gold charts.
    Class names start with fn- so they cannot clash with other pages.
-   ===================================================================== */
+   */
 .fn{max-width:1500px;margin:0 auto}
 .fn [hidden]{display:none!important}
 .fn-frame{display:grid;grid-template-columns:216px minmax(0,1fr);border-radius:14px;overflow:hidden;border:1px solid var(--line);box-shadow:0 8px 24px #0a246426;background:var(--paper)}
@@ -703,14 +703,14 @@ dialog:has(.fn-radio){width:min(520px,calc(100vw - 24px))}
 
 :root[data-theme="light"]{color-scheme:light}:root[data-theme="dark"]{color-scheme:dark}
 
-/* ---------- Light / dark switch (every page) ---------- */
+/* Light / dark switch (every page) */
 .themebtn{display:inline-grid;place-items:center;flex:none;width:40px;height:40px;min-height:40px;padding:0;border-radius:50%;background:#ffffff14;border:1px solid #ffffff44;color:#fff;cursor:pointer}
 .themebtn:hover{background:#ffffff26}
 .themebtn svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 #nav .top .themebtn{margin-left:auto;margin-right:8px}
 .theme-float{position:fixed;top:12px;right:12px;z-index:60}.theme-float .themebtn{background:var(--card);color:var(--ink);border-color:var(--line);box-shadow:0 2px 8px #0002}
 
-/* ---------- Client area (shop.html): left menu, name and icon top right ---------- */
+/* Client area (shop.html): left menu, name and icon top right */
 .cs-page{background:var(--paper)}
 .cs-top{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:10px;min-height:58px;padding:8px clamp(12px,3vw,24px);padding-top:max(8px,env(safe-area-inset-top));background:var(--pos-bar);color:#fff}
 .cs-brand{color:#fff;text-decoration:none;font-weight:700;font-size:1.35rem;letter-spacing:-.01em;line-height:1}.cs-brand b{color:var(--gold)}
