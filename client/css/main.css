@@ -707,7 +707,6 @@ dialog:has(.fn-radio){width:min(520px,calc(100vw - 24px))}
 .themebtn{display:inline-grid;place-items:center;flex:none;width:40px;height:40px;min-height:40px;padding:0;border-radius:50%;background:#ffffff14;border:1px solid #ffffff44;color:#fff;cursor:pointer}
 .themebtn:hover{background:#ffffff26}
 .themebtn svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-#nav .top .themebtn{margin-left:auto;margin-right:8px}
 .theme-float{position:fixed;top:12px;right:12px;z-index:60}.theme-float .themebtn{background:var(--card);color:var(--ink);border-color:var(--line);box-shadow:0 2px 8px #0002}
 
 /* Client area (shop.html): left menu, name and icon top right */
@@ -748,4 +747,45 @@ dialog:has(.fn-radio){width:min(520px,calc(100vw - 24px))}
   .cs-page .bar{top:128px}
 }
 @media(max-width:520px){.cs-name{display:none}.cs-chip{padding:4px}.cs-brand{font-size:1.2rem}}
-#nav .top .brand{white-space:nowrap}#nav .top .themebtn{width:36px;height:36px;min-height:36px;margin-right:0}
+
+/* =====================================================================
+   NAV TOP BAR SPACING FIX (keep this block LAST in the file)
+   Row: brand · clock (Checkout only) · theme button · menu button
+   ===================================================================== */
+#nav .top{gap:8px}
+#nav .top .brand{flex:0 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#nav .top .clock{flex:0 1 auto;min-width:0;margin:0 0 0 10px;overflow:hidden;text-overflow:ellipsis}
+#nav .top .themebtn{flex:none;width:36px;height:36px;min-height:36px;margin:0 0 0 auto}
+#nav .top #menu{flex:none;margin:0}
+
+/* small phones: tighter bar so nothing overlaps */
+@media(max-width:420px){
+  #nav{padding-left:10px;padding-right:10px}
+  #nav .top{gap:6px}
+  #nav .top .brand{font-size:1rem}
+  #nav .top .themebtn{width:34px;height:34px;min-height:34px}
+  #nav .top #menu{min-width:40px;min-height:40px;font-size:1.1rem}
+}
+
+/* very small phones: hide the Checkout clock to make room */
+@media(max-width:360px){
+  #nav .top .clock{display:none!important}
+  #nav .top .brand{font-size:.95rem}
+}
+
+/* =====================================================================
+   CLIENT PROFILE DROPDOWN (shop.html) – solid orange box, Sign out only on phones
+   Keep this block LAST in the file
+   ===================================================================== */
+.cs-menu{background:#f28c1e;color:#2a1500;border:1px solid #d97706;box-shadow:0 14px 34px #0006;opacity:1;-webkit-backdrop-filter:none;backdrop-filter:none}
+.cs-menu button{background:#fff;color:#2a1500;border:1px solid #fff;font-weight:700;justify-content:center}
+.cs-menu button:hover{background:#ffe9cc;border-color:#ffe9cc}
+
+@media(max-width:899px){
+  .cs-menu{min-width:150px;padding:8px}
+  .cs-menu .cs-who{display:none}                       
+  .cs-menu button:not(:last-child){display:none}       
+  .cs-menu button:last-child,
+  .cs-menu .cs-signout{display:flex!important}
+  .cs-menu .cs-signout{border-color:#fff!important}
+}
