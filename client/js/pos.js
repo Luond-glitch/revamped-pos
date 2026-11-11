@@ -1,4 +1,4 @@
-let customer = null, products = [], cart = [], saleKey = crypto.randomUUID(), shift = null, tab = 'all', cat = '';
+let canCredit = false, customer = null, products = [], cart = [], saleKey = crypto.randomUUID(), shift = null, tab = 'all', cat = '';
 const subtotal = () => cart.reduce((t, l) => t + l.p.price * l.qty, 0);   //  the server recalculates everything
 const discount = () => { const v = parseFloat($('#disc').value) || 0, s = subtotal(); return Math.min(Math.max($('#dtype').value === 'pct' ? Math.round(s * v / 100) : toCents(v), 0), s); };
 const total = () => subtotal() - discount();
@@ -21,6 +21,7 @@ const ico = n => `<svg viewBox="0 0 24 24" aria-hidden="true">${IC[n]}</svg>`;
 const SOON = [['bag', 'Layaway'], ['drawer', 'Cash drawer'], ['dollar', 'Payout'], ['gift', 'Loyalty']];
 
 boot('pos').then(async user => {
+  canCredit = can(user, 'credit.sell');
   shift = await API.currentShift(); await search('');
   $('#banner').innerHTML = shift ? '' : '<div class="banner"><span>No shift is open. <a href="dashboard.html" style="color:#fff">Open a shift on the dashboard</a> before charging.</span></div>';
   const sb = $('#shiftb'); sb.textContent = shift ? 'Shift open' : 'No shift open'; sb.className = 'shiftb' + (shift ? '' : ' off');
@@ -98,20 +99,21 @@ function render() {
 
 /* ---------- payment (unchanged logic) ---------- */
 const METHODS = [['CASH', 'Cash'], ['MPESA', 'M-Pesa'], ['CARD', 'Card']];
+const CREDIT = ['CREDIT', 'Pay later'];   // only for people allowed to sell on credit, and only when a client is on the sale
 function pay() {
-  if (!cart.length || !shift) return; const due = total(), disc = discount();
+  if (!cart.length || !shift) return; const due = total(), disc = discount(), ms = canCredit && customer ? [...METHODS, CREDIT] : METHODS;
   const d = modal(`<h2>Payment</h2><div class="total"><span>Due</span><span>${fmt(due)}</span></div>
-    ${METHODS.map(([m, l]) => `<div class="row" style="margin-bottom:8px;align-items:flex-end"><label style="margin:0;flex:1">${l} (KES)<input data-m="${m}" type="number" min="0" step="0.01" value="${m === 'CASH' ? (due / 100).toFixed(2) : ''}"></label>
-      ${m === 'CASH' ? '<div style="flex:1"></div>' : `<label style="margin:0;flex:1">${m === 'MPESA' ? 'M-Pesa code' : 'Card approval ref'}<input data-ref="${m}" autocomplete="off"></label>`}</div>`).join('')}
+    ${ms.map(([m, l]) => `<div class="row" style="margin-bottom:8px;align-items:flex-end"><label style="margin:0;flex:1">${l} (KES)<input data-m="${m}" type="number" min="0" step="0.01" value="${m === 'CASH' ? (due / 100).toFixed(2) : ''}"></label>
+      ${m === 'CASH' || m === 'CREDIT' ? `<div style="flex:1">${m === 'CREDIT' ? `<small>${esc(customer.name)} pays later</small>` : ''}</div>` : `<label style="margin:0;flex:1">${m === 'MPESA' ? 'M-Pesa code' : 'Card approval ref'}<input data-ref="${m}" autocomplete="off"></label>`}</div>`).join('')}
     <p id="chg" style="font-size:1.1rem;font-weight:600;min-height:1.5em"></p><div class="actions"><button data-close>Back</button><button class="primary" id="go">Complete sale</button></div>`);
   const amt = m => toCents($(`[data-m=${m}]`, d).value), ref = m => ($(`[data-ref=${m}]`, d)?.value || '').trim();
-  const upd = () => { const paid = amt('CASH') + amt('MPESA') + amt('CARD'), other = amt('MPESA') + amt('CARD'), c = paid - due;
+  const upd = () => { const paid = amt('CASH') + amt('MPESA') + amt('CARD') + (ms.length > METHODS.length ? amt('CREDIT') : 0), other = amt('MPESA') + amt('CARD') + (ms.length > METHODS.length ? amt('CREDIT') : 0), c = paid - due;
     const noRef = (amt('MPESA') > 0 && !ref('MPESA')) || (amt('CARD') > 0 && !ref('CARD'));
-    $('#chg', d).textContent = c < 0 ? 'Short by ' + fmt(-c) : other > due ? 'Card and M-Pesa are more than the amount due' : noRef ? 'Enter the M-Pesa code or card reference' : c ? 'Change: ' + fmt(c) : 'Paid in full';
+    $('#chg', d).textContent = c < 0 ? 'Short by ' + fmt(-c) : other > due ? 'Card and M-Pesa are more than the amount due' : noRef ? 'Enter the M-Pesa code or card reference' : c ? 'Change: ' + fmt(c) : ms.length > METHODS.length && amt('CREDIT') ? 'Balance owed by client: ' + fmt(amt('CREDIT')) : 'Paid in full';
     $('#go', d).disabled = c < 0 || other > due || noRef; };
   $$('input', d).forEach(i => i.oninput = upd); upd(); $('[data-m=CASH]', d).select();
   $('#go', d).onclick = async e => { e.target.disabled = true;   // idempotency key protects against double-clicks and retries
-    try { const payments = METHODS.map(([m]) => ({ method: m, amount: amt(m), reference: ref(m) })).filter(p => p.amount > 0);
+    try { const payments = ms.map(([m]) => ({ method: m, amount: amt(m), reference: ref(m) })).filter(p => p.amount > 0);
       const sale = await API.createSale({ branchId: CONFIG.BRANCH_ID, registerId: CONFIG.REGISTER_ID, idempotencyKey: saleKey, discount: disc, customerId: customer?.id || null, payments,
         items: cart.map(l => ({ productId: l.p.id, quantity: l.qty })) });
       d.close(); cart = []; customer = null; chip(); $('#disc').value = ''; await search(''); showReceipt(sale); }

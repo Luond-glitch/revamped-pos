@@ -8,7 +8,7 @@ const when = iso => new Date(iso).toLocaleString('en-KE', { dateStyle: 'medium',
 // [page, label, permission needed to see it]. The server checks permissions again on every request: hiding a link is only a convenience.
 const NAV = [
   ['dashboard', 'Dashboard', 'dashboard.view'], ['pos', 'Checkout', 'pos.use'], ['sales', 'Sales', 'sales.view'], ['products', 'Products', 'products.manage'],
-  ['inventory', 'Inventory', 'inventory.manage'], ['purchases', 'Purchases', 'purchases.manage'], ['reports', 'Reports', 'reports.view'],
+  ['inventory', 'Inventory', 'inventory.manage'], ['purchases', 'Purchases', 'purchases.manage'], ['reports', 'Reports', 'reports.view'], ['payments', 'Payments', 'payments.view'],
   ['customers', 'Clients', 'customers.manage'], ['users', 'Staff', 'users.view'],
 ];
 const can = (u, p) => !!u && (u.permissions || []).includes(p);
@@ -47,7 +47,7 @@ function receiptHTML(s) {
   return `<div class="receipt"><div style="text-align:center"><b>Universal POS</b><br>${esc(when(s.createdAt))}<br>${esc(s.receiptNumber)} · ${esc(s.cashier)}${s.customerName ? '<br>Client: ' + esc(s.customerName) : ''}</div><hr>
   ${s.items.map(i => `<div>${esc(i.name)}</div><div class="r"><span>${i.quantity} × ${fmt(i.unitPrice)}</span><span>${fmt(i.unitPrice * i.quantity)}</span></div>`).join('')}<hr>
   <div class="r"><span>VAT included</span><span>${fmt(s.taxTotal)}</span></div><div class="r"><b>Total</b><b>${fmt(s.grandTotal)}</b></div>
-  ${s.discountTotal ? `<div class="r"><span>Discount</span><span>-${fmt(s.discountTotal)}</span></div>` : ''}${(s.payments || [{ method: s.method, amount: s.grandTotal }]).map(p => `<div class="r"><span>${esc(p.method)} ${esc(p.reference || '')}</span><span>${fmt(p.amount)}</span></div>`).join('')}<div class="r"><span>Change</span><span>${fmt(s.change)}</span></div></div>`;
+  ${s.discountTotal ? `<div class="r"><span>Discount</span><span>-${fmt(s.discountTotal)}</span></div>` : ''}${(s.payments || [{ method: s.method, amount: s.grandTotal }]).map(p => `<div class="r"><span>${esc(p.method)} ${esc(p.reference || '')}</span><span>${fmt(p.amount)}</span></div>`).join('')}<div class="r"><span>Change</span><span>${fmt(s.change)}</span></div>${s.balance ? `<div class="r"><b>Balance due</b><b>${fmt(s.balance)}</b></div>` : ''}</div>`;
 }
 function showReceipt(s) {
   const d = modal(receiptHTML(s) + '<div class="actions"><button data-close>Close</button><button class="primary" id="pr">Print receipt</button></div>');

@@ -276,10 +276,10 @@ html:has(.hero){background:#14213d} /* no cream strip showing when a phone over-
 @media(max-width:640px){.bl{grid-template-columns:auto 1fr auto;grid-template-areas:"pic name rm" "pic qty total"}
 .bl>:nth-child(1){grid-area:pic}.bl>:nth-child(2){grid-area:name}.bl>:nth-child(3){grid-area:qty}.bl>:nth-child(4){grid-area:total;text-align:right}.bl>:nth-child(5){grid-area:rm}}
 
-/* =====================================================================
+/* 
    INVENTORY – header banner, overview cards, dashboard panels, stock table
    (class names are prefixed iv- so they cannot clash with other pages)
-   ===================================================================== */
+    */
 .iv{display:grid;gap:14px;max-width:1500px;margin:0 auto}
 .iv small{color:var(--mute);font-weight:400}
 .iv-head{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding:18px 20px;border-radius:14px;color:#fff;
@@ -618,3 +618,144 @@ dialog:has(.st-form){width:min(560px,calc(100vw - 24px))}
   .st-hero .iv-actions{width:100%}.st-hero .iv-actions > *{flex:1}
 }
 @media(prefers-reduced-motion:reduce){button.st-tick{transition:none}}
+/* =====================================================================
+   MODULE 3 – PAYMENTS & FINANCE (dashboard layout from the proposal)
+   Navy side menu with a gold active item, white top bar, navy and gold charts.
+   Class names start with fn- so they cannot clash with other pages.
+   ===================================================================== */
+.fn{max-width:1500px;margin:0 auto}
+.fn [hidden]{display:none!important}
+.fn-frame{display:grid;grid-template-columns:216px minmax(0,1fr);border-radius:14px;overflow:hidden;border:1px solid var(--line);box-shadow:0 8px 24px #0a246426;background:var(--paper)}
+.fn-side{display:flex;flex-direction:column;gap:18px;padding:18px 12px;background:linear-gradient(180deg,#14213d,#0d1830)}
+.fn-logo{padding:4px 8px;color:#fff;font-size:1.55rem;font-weight:700;letter-spacing:-.01em;line-height:1.1}.fn-logo b{color:var(--gold)}
+.fn-side #tabs{display:flex;flex-direction:column;gap:4px}
+.fn-side #tabs button{display:flex;align-items:center;gap:12px;width:100%;padding:11px 12px;border:0;border-radius:8px;background:transparent;color:#d7def0;font-weight:500;text-align:left;white-space:nowrap}
+.fn-side #tabs button:hover{background:#ffffff14}
+.fn-side #tabs button.on{background:var(--gold);color:#14213d;font-weight:700}
+.fn-side #tabs svg{flex:none;width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.fn-main{min-width:0;display:grid;gap:14px;align-content:start;padding-bottom:16px}
+.fn-main > *:not(.fn-top){margin-inline:16px}
+.fn-top{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px;padding:14px 18px;background:var(--card);border-bottom:1px solid var(--line)}
+.fn-top h1{margin:0;font-size:clamp(1.15rem,.9rem + 1vw,1.5rem)}
+.fn-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.fn-tools select,.fn-tools input{width:auto;min-width:130px;padding:7px 10px}
+.fn-tools .gold{background:var(--gold);border-color:var(--gold);color:#14213d;font-weight:700}
+.fn-dates{display:inline-flex;gap:6px}
+.fn #view{display:grid;grid-template-columns:minmax(0,1fr);gap:14px}.fn .card{min-width:0}
+.fn .iv-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.fn .span3{grid-column:1 / -1}
+@media(min-width:1500px){.fn .iv-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.fn .rp-chart{--bar:#14213d}
+.fn .iv-legend span:first-child i{background:#14213d!important}
+@media(prefers-color-scheme:dark){.fn .rp-chart{--bar:#7a9be0}.fn .iv-legend span:first-child i{background:#7a9be0!important}}
+.fn-profit{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;margin:2px 0 12px}.fn-profit b{font-size:clamp(1.7rem,1.2rem + 2vw,2.5rem);line-height:1.1;font-variant-numeric:tabular-nums}
+.fn-note{margin:0;color:var(--mute);font-size:.82rem;text-align:center}
+.fn-radio{display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;color:var(--ink);font-size:.95rem}
+.fn-radio input{width:auto;margin-top:4px}.fn-radio small{display:block;color:var(--mute)}
+dialog:has(.fn-radio){width:min(520px,calc(100vw - 24px))}
+@media(max-width:1499px){
+  .fn-frame{grid-template-columns:minmax(0,1fr)}
+  .fn-side{gap:8px;padding:10px}
+  .fn-side #tabs{flex-direction:row;overflow-x:auto;scrollbar-width:none}.fn-side #tabs::-webkit-scrollbar{display:none}
+  .fn-side #tabs button{flex:none;width:auto;padding:9px 14px}
+}
+@media(max-width:699px){.fn .iv-grid{grid-template-columns:minmax(0,1fr)}.fn .span2{grid-column:auto}.fn-main > *:not(.fn-top){margin-inline:12px}.fn-top{padding:12px 14px}
+  .fn-tools{width:100%}.fn-tools select{flex:1 1 140px}.fn-tools button{flex:1 1 auto}.fn-dates{width:100%}.fn-dates input{flex:1}}
+@media print{
+  .fn-side{display:none}.fn-frame{display:block;box-shadow:none;border:0}.fn-top{border:0;padding:0 0 8px}.fn-main > *:not(.fn-top){margin-inline:0}
+  .fn .iv-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.fn .rp-col i,.fn .rp-hb .t i,.fn .rp-donut{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
+/* Module 3 tidy */
+@media(min-width:900px) and (max-width:1499px){.fn .rp-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.fn .rp-kpis .iv-stat b{white-space:nowrap;overflow-wrap:normal}
+.fn td.n,.fn .rp-amt{white-space:nowrap}
+.fn td:first-child,.fn th:first-child{white-space:nowrap}
+.fn .rp-scroll td,.fn .rp-scroll th{padding-left:8px;padding-right:8px}
+@media(max-width:699px){.fn .rp-kpis .iv-stat b{white-space:normal;overflow-wrap:anywhere;font-size:1.05rem}.fn .rp-kpis{gap:8px}.fn .rp-kpis .iv-stat{padding:10px;gap:8px}.fn .rp-kpis .iv-stat > i,.fn .rp-kpis .iv-stat > .iv-ico{width:34px;height:34px}}
+@media(min-width:900px) and (max-width:1499px){.fn .rp-scroll td:nth-child(4){white-space:normal}}
+/* =====================================================================
+   MODULE 4 – PURCHASING & SUPPLIERS (pu-)
+   Layout and colours follow the proposal's purchasing screen: dark green side menu,
+   white cards, teal and green charts. Reuses the iv- / rp- pieces already in main.css
+   (cards, pills, lists, donut, tables). You can keep this as its own file or paste it
+   at the end of main.css.
+   ===================================================================== */
+   .pu{--pu-green:#0f8a6d;--pu-teal:#14b8a6;--pu-a:#7fd8cb;--pu-b:#0f8a6d;--pu-side1:#0f3b3a;--pu-side2:#0a2226;max-width:1500px;margin:0 auto}
+   @media(prefers-color-scheme:dark){.pu{--pu-green:#34d3b0;--pu-a:#2c7a70;--pu-b:#5eead4}}
+   .pu [hidden]{display:none!important}
+   .pu small{color:var(--mute);font-weight:400}
+   
+   .pu-frame{display:grid;grid-template-columns:216px minmax(0,1fr);border-radius:14px;overflow:hidden;border:1px solid var(--line);box-shadow:0 8px 24px #0a22262e;background:var(--paper)}
+   .pu-side{display:flex;flex-direction:column;gap:18px;padding:18px 12px;background:linear-gradient(180deg,var(--pu-side1),var(--pu-side2))}
+   .pu-logo{padding:4px 8px;color:#fff;font-size:1.45rem;font-weight:700;letter-spacing:-.01em;line-height:1.1}.pu-logo b{color:#5eead4}
+   .pu-side #tabs{display:flex;flex-direction:column;gap:4px}
+   .pu-side #tabs button{display:flex;align-items:center;gap:12px;width:100%;padding:11px 12px;border:0;border-radius:8px;background:transparent;color:#d3ece7;font-weight:500;text-align:left;white-space:nowrap}
+   .pu-side #tabs button:hover{background:#ffffff16}
+   .pu-side #tabs button.on{background:#2dd4bf;color:#04302b;font-weight:700}
+   .pu-side #tabs svg{flex:none;width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+   
+   .pu-main{min-width:0;display:grid;gap:14px;align-content:start;padding-bottom:16px}
+   .pu-main > #view{margin-inline:16px}
+   .pu-top{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px;padding:14px 18px;background:var(--card);border-bottom:1px solid var(--line)}
+   .pu-top h1{margin:0;font-size:clamp(1.15rem,.9rem + 1vw,1.5rem)}
+   .pu-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+   .pu-gold{background:var(--pu-green);border-color:var(--pu-green);color:#fff;font-weight:700}
+   .pu-gold:hover{filter:brightness(1.1);border-color:var(--pu-green)}
+   
+   /* shared tweaks on this page */
+   .pu #view .span3{grid-column:1 / -1}
+   .pu .iv-panel h2 small{margin-right:auto}
+   .pu-due{color:var(--danger);font-weight:600}
+   .pu td.n,.pu .rp-amt{white-space:nowrap}
+   .pu td:first-child{white-space:nowrap}
+   .pu .iv-chips button.on{background:var(--pu-green);border-color:var(--pu-green);color:#fff}
+   .pu .iv-link{color:var(--pu-green)}
+   .pu .iv-list button.primary,.pu td button.primary{background:var(--pu-green);border-color:var(--pu-green);color:#fff}
+   .pu .iv-pill.low{white-space:nowrap}
+   
+   /* delivery progress (ordered vs delivered) */
+   .pu-prog{height:8px;min-width:90px;border-radius:99px;background:var(--line);overflow:hidden;margin:2px 0 3px}
+   .pu-prog i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#14b8a6,#0f8a6d);transition:width .5s}
+   .pu-prog i.full{background:var(--pu-green)}
+   .iv-list .pu-prog{margin-top:6px}
+   
+   /* purchases by month: two bars per month */
+   .pu-chart{width:100%}
+   .pu-plot{position:relative;height:230px;border-bottom:2px solid var(--line)}
+   .pu-y{position:absolute;inset:0;pointer-events:none}
+   .pu-y span{position:absolute;left:0;right:0;border-top:1px dashed var(--line);font-size:.68rem;line-height:1.2;color:var(--mute);padding-top:1px}
+   .pu-y span:nth-child(1){top:0}.pu-y span:nth-child(2){top:50%}
+   .pu-cols{position:absolute;inset:0;display:grid;grid-auto-flow:column;grid-auto-columns:1fr}
+   .pu-col{display:flex;align-items:flex-end;justify-content:center;gap:4px;height:100%;padding:0 4px}
+   .pu-col i{display:block;width:34%;max-width:26px;min-height:2px;border-radius:6px 6px 0 0;transform-origin:bottom;animation:iv-grow .7s cubic-bezier(.2,.7,.2,1) both}
+   .pu-col i.a{background:var(--pu-a)}.pu-col i.b{background:var(--pu-b)}
+   .pu-col:hover i{filter:brightness(1.12)}
+   .pu-x{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;margin-top:6px;font-size:.72rem;color:var(--mute);text-align:center}
+   
+   /* filters and forms */
+   .pu-filters{display:grid;grid-template-columns:2fr 1.4fr 1fr 1fr;gap:4px 12px;align-items:end;margin-bottom:8px}
+   .pu-filters.two{grid-template-columns:minmax(0,2fr) minmax(0,1.2fr)}
+   .pu-filters label{margin:0}
+   .pu-chips{margin:6px 0 12px}
+   .pu-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 12px}
+   .pu-form .w2{grid-column:1 / -1}
+   dialog:has(.pu-form){width:min(560px,calc(100vw - 24px))}
+   
+   /* responsive: the side menu becomes a scrolling row above the content */
+   @media(max-width:1399px){
+     .pu-frame{grid-template-columns:minmax(0,1fr)}
+     .pu-side{gap:8px;padding:10px}.pu-logo{display:none}
+     .pu-side #tabs{flex-direction:row;overflow-x:auto;scrollbar-width:none}.pu-side #tabs::-webkit-scrollbar{display:none}
+     .pu-side #tabs button{flex:none;width:auto;padding:9px 14px}
+   }
+   @media(max-width:899px){.pu-filters{grid-template-columns:repeat(2,minmax(0,1fr))}.pu-filters.two{grid-template-columns:minmax(0,1fr)}}
+   @media(max-width:699px){
+     .pu-main > #view{margin-inline:12px}.pu-top{padding:12px 14px}
+     .pu-tools{width:100%}.pu-tools button{flex:1 1 auto}
+     .pu-plot{height:200px}
+     .pu .rp-kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+     .pu .rp-kpis .iv-stat{padding:10px;gap:8px}.pu .rp-kpis .iv-stat b{white-space:normal;overflow-wrap:anywhere;font-size:1.05rem}
+     .pu .iv-list li{flex-wrap:wrap}
+     .pu-prog{width:140px}
+   }
+   @media(max-width:520px){.pu-filters{grid-template-columns:minmax(0,1fr)}.pu-form{grid-template-columns:minmax(0,1fr)}.pu .rp-kpis{grid-template-columns:minmax(0,1fr)}}
+   @media(prefers-reduced-motion:reduce){.pu-col i{animation:none}.pu-prog i{transition:none}}

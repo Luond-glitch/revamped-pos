@@ -18,6 +18,7 @@
   const ACTION = { LOGIN: ['Signed in', 'ok'], LOGOUT: ['Signed out', ''], LOGIN_BLOCKED: ['Blocked sign-in', 'out'], STAFF_ADD: ['Account created', 'ok'], STAFF_EDIT: ['Account edited', ''],
     STAFF_OFF: ['Account switched off', 'out'], STAFF_ON: ['Account switched on', 'ok'], PERMISSIONS: ['Permissions changed', 'low'], SHIFT_OPEN: ['Shift opened', 'ok'], SHIFT_CLOSE: ['Shift closed', ''],
     REFUND: ['Refund', 'low'], DISCOUNT: ['Discount', 'low'], STOCK_ADJUST: ['Stock adjusted', ''], PRODUCT_ADD: ['Product added', ''], PRODUCT_EDIT: ['Product edited', ''], PO_CREATE: ['Purchase order', ''],
+    CREDIT_SALE: ['Sale on credit', 'low'], EXPENSE_ADD: ['Expense recorded', ''], EXPENSE_OK: ['Expense approved', 'ok'], EXPENSE_NO: ['Expense rejected', 'out'], CASH_MOVE: ['Cash movement', ''], SUPPLIER_PAY: ['Supplier paid', ''], CLIENT_PAY: ['Client payment', 'ok'], RECONCILE: ['Reconciled', ''],
     SYSTEM: ['System setting', 'low'], SESSIONS_REVOKED: ['Signed out remotely', 'low'], BACKUP: ['Backup downloaded', ''] };
   const stDiff = n => n === 0 ? '<span class="iv-pill ok">Balanced</span>' : `<span class="iv-pill ${n > 0 ? 'low' : 'out'}">${n > 0 ? 'Over ' : 'Short '}${fmt(Math.abs(n))}</span>`;
   const stAvatar = n => { let h = 0; for (const c of n) h = (h * 31 + c.charCodeAt(0)) % 360;

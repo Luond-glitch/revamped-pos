@@ -25,6 +25,13 @@ const RealAPI = {
   setMaintenance: on => RealAPI.req('PATCH', '/system', { maintenance: on }),
   revokeSessions: id => RealAPI.req('POST', '/system/sessions/revoke', { userId: id }),
   backup: () => RealAPI.req('GET', '/system/backup'),
+  finance: () => RealAPI.req('GET', '/finance'),
+  saveExpense: e => RealAPI.req('POST', '/finance/expenses', e),
+  setExpenseStatus: (id, status) => RealAPI.req('PATCH', '/finance/expenses/' + id, { status }),
+  saveMove: m => RealAPI.req('POST', '/finance/cash-movements', m),
+  paySupplier: p => RealAPI.req('POST', '/finance/supplier-payments', p),
+  recordClientPayment: p => RealAPI.req('POST', '/finance/client-payments', p),
+  reconcile: keys => RealAPI.req('POST', '/finance/reconcile', { keys }),
   payroll: (from, to) => RealAPI.req('GET', '/payroll?' + new URLSearchParams({ from, to })),
   setUserStatus: (id, status) => RealAPI.req('PATCH', '/users/' + id, { status }),
   customers: () => RealAPI.req('GET', '/customers'),
@@ -64,6 +71,8 @@ const PERMISSIONS = [ // [id, label, group]
   ['reports.view', 'See reports and profit', 'Reports'],
   ['users.view', 'See staff accounts', 'People'], ['users.manage', 'Create, edit and switch off accounts', 'People'], ['shifts.view', 'See cashier shifts', 'People'],
   ['audit.view', 'See the activity log', 'People'], ['payroll.export', 'Download payroll data', 'People'], ['permissions.manage', 'Change what each role can do', 'People'],
+  ['payments.view', 'See payments, balances and tax reports', 'Money'], ['payments.manage', 'Reconcile, record cash movements and take payments owed', 'Money'],
+  ['expenses.record', 'Record expenses', 'Money'], ['expenses.approve', 'Approve or reject expenses', 'Money'], ['credit.sell', 'Sell on credit (pay later)', 'Money'],
 ];
 const DEFAULT_ROLES = {
   super_admin: PERMISSIONS.map(p => p[0]),
@@ -72,6 +81,7 @@ const DEFAULT_ROLES = {
   cashier: ['dashboard.view', 'pos.use'],
   stock_controller: ['dashboard.view', 'products.manage', 'inventory.manage', 'purchases.manage'],
 };
+const PAY_METHODS = ['CASH', 'MPESA', 'CARD', 'BANK']; // approved ways of receiving or paying money (CREDIT, pay later, is only for sales)
 const isSuper = r => r === 'super_admin', isTop = r => r === 'super_admin' || r === 'administrator'; // who may manage administrator accounts
 const roleName = r => (ROLES.find(x => x[0] === r) || [r, r])[1];
 
@@ -104,6 +114,11 @@ const MockAPI = (() => {
     let changed = false;
     if (!d.roles) { d.roles = structuredClone(DEFAULT_ROLES); changed = true; }
     if (!d.roles.super_admin) { d.roles.super_admin = PERMISSIONS.map(p => p[0]); changed = true; }
+    // Permissions added after the data was first saved: give them to the roles that should have them (once), without undoing later changes
+    d.permsSeen ||= PERMISSIONS.map(p => p[0]).filter(p => !['payments.view', 'payments.manage', 'expenses.record', 'expenses.approve', 'credit.sell'].includes(p));
+    PERMISSIONS.map(p => p[0]).filter(p => !d.permsSeen.includes(p)).forEach(p => { Object.keys(DEFAULT_ROLES).forEach(r => { if (DEFAULT_ROLES[r].includes(p) && !(d.roles[r] ||= []).includes(p)) d.roles[r].push(p); }); d.permsSeen.push(p); changed = true; });
+    if (!d.fin) { d.fin = { expenses: [], moves: [], recon: {}, supplierPayments: [], clientPayments: [], seq: { exp: 0, sp: 0, cp: 0 } }; changed = true; }
+    if (!d.fin.clientPayments) { d.fin.clientPayments = []; changed = true; } if (!d.fin.seq) { d.fin.seq = { exp: 0, sp: 0, cp: 0 }; changed = true; }
     if (!d.audit) { d.audit = []; changed = true; }
     if (!d.shifts) { d.shifts = []; changed = true; }
     seed().users.forEach(su => { if (!d.users.some(u => u.email === su.email)) { d.users.push(su); changed = true; } });
@@ -155,6 +170,9 @@ const MockAPI = (() => {
     async createSale({ items, payments, discount = 0, customerId = null, idempotencyKey }) {
       const d = load(); if (!can(d, 'pos.use')) return deny('make sales'); if (d.idem[idempotencyKey]) return wait(d.sales.find(s => s.id === d.idem[idempotencyKey]));
       if (!d.shift) return fail('Open a shift before selling.'); if (!items.length) return fail('Cart is empty.');
+      if (payments.some(x => ![...PAY_METHODS, 'CREDIT'].includes(x.method) || !(x.amount >= 0))) return fail('Unknown payment method.');
+      const credit = payments.filter(x => x.method === 'CREDIT').reduce((a, x) => a + x.amount, 0);
+      if (credit) { if (!can(d, 'credit.sell')) return deny('sell on credit'); if (!(d.customers || []).some(c => c.id === customerId)) return fail('Add the client to the sale before selling on credit.'); }
       const rows = []; let sub = 0;
       for (const it of items) { 
         const p = d.products.find(x => x.id === it.productId); if (!p) return fail('Product not found.');
@@ -170,12 +188,13 @@ const MockAPI = (() => {
       const paid = payments.reduce((a, x) => a + x.amount, 0), cash = payments.filter(x => x.method === 'CASH').reduce((a, x) => a + x.amount, 0);
       if (paid < total) return fail('Payment is less than the amount due.');
       if (paid - cash > total) return fail('Card and M-Pesa payments cannot be more than the amount due.');
-      if (payments.some(x => x.method !== 'CASH' && !x.reference)) return fail('Enter the M-Pesa code or card reference.');
+      if (payments.some(x => x.method !== 'CASH' && x.method !== 'CREDIT' && !x.reference)) return fail('Enter the M-Pesa code, card or bank reference.');
       const change = paid - total, rec = payments.map(x => x.method === 'CASH' ? { ...x, amount: x.amount - change } : x).filter(x => x.amount > 0);
       lines.forEach(l => { const p = d.products.find(x => x.id === l.productId); p.stock -= l.quantity;
         d.movements.unshift({ id: uid(), productId: p.id, name: p.name, type: 'SALE', delta: -l.quantity, reason: 'Sale', by: me().name, at: new Date().toISOString() }); });
       const sale = { id: uid(), receiptNumber: 'R-' + (++d.seq), items: lines, subtotal: total - tax, discountTotal: discount, taxTotal: tax, grandTotal: total, tendered: paid, change,
-        branchId: CONFIG.BRANCH_ID, customerId, customerName: (d.customers || []).find(c => c.id === customerId)?.name || '', payments: rec, method: rec.length > 1 ? 'SPLIT' : rec[0].method, cashier: me().name, cashierId: me().id, status: 'COMPLETED', createdAt: new Date().toISOString() };
+        branchId: CONFIG.BRANCH_ID, customerId, customerName: (d.customers || []).find(c => c.id === customerId)?.name || '', payments: rec, method: rec.length > 1 ? 'SPLIT' : rec[0].method, cashier: me().name, cashierId: me().id, status: 'COMPLETED', balance: credit, createdAt: new Date().toISOString() };
+      if (credit) log(d, 'CREDIT_SALE', sale.receiptNumber + ' · ' + fmtKes(credit) + ' on credit · ' + sale.customerName);
       if (discount) log(d, 'DISCOUNT', sale.receiptNumber + ' · ' + fmtKes(discount)); d.sales.unshift(sale); d.idem[idempotencyKey] = sale.id; save(d); return wait(sale);
     },
     /* ---------- Staff accounts, roles, audit log ---------- */
@@ -245,7 +264,7 @@ const MockAPI = (() => {
           shifts: sh.length, hours: +(sh.reduce((h, x) => h + (new Date(x.closedAt) - new Date(x.openedAt)) / 36e5, 0)).toFixed(2), salesCount: sales.length, salesTotal: sales.reduce((a, s) => a + net(s), 0),
           cashShortOver: sh.reduce((a, x) => a + (x.difference || 0), 0) }; })); },
     async customers() { const d = load(); return wait((d.customers || []).map(({ password, ...c }) => { const mine = d.sales.filter(s => s.customerId === c.id);
-      return { ...c, hasAccount: !!password, purchases: mine.length, spent: mine.reduce((t, s) => t + s.grandTotal - (s.refundTotal || 0), 0) }; })); },
+      return { ...c, hasAccount: !!password, purchases: mine.length, spent: mine.reduce((t, s) => t + s.grandTotal - (s.refundTotal || 0), 0), owes: mine.reduce((t, s) => t + (s.balance || 0), 0) }; })); },
     async saveCustomer(c) { const d = load(); d.customers ||= []; if (!c.name || !c.phone) return fail('Name and phone are required.');
       d.customers.push({ id: uid(), name: c.name, phone: c.phone.replace(/\s/g, ''), email: (c.email || '').toLowerCase(), createdAt: new Date().toISOString() }); save(d); return wait({}); },
     async findCustomer(q) { q = q.trim().toLowerCase().replace(/\s/g, ''); const c = (load().customers || []).find(x => x.phone === q || (x.email && x.email === q));
@@ -296,7 +315,8 @@ const MockAPI = (() => {
       if (!done.length) return fail('Choose at least one item to refund.');
       done.forEach(([l, q]) => { l.refundedQty = (l.refundedQty || 0) + q; const p = d.products.find(x => x.id === l.productId); if (p) p.stock += q;
         d.movements.unshift({ id: uid(), productId: l.productId, name: l.name, type: 'REFUND', delta: q, reason: 'Refund ' + s.receiptNumber, by: me().name, at: new Date().toISOString() }); });
-      s.refunds = [...(s.refunds || []), { id: uid(), amount, reason, by: me().name, at: new Date().toISOString() }]; s.refundTotal = (s.refundTotal || 0) + amount;
+      const owed = Math.min(s.balance || 0, amount); s.balance = (s.balance || 0) - owed; // money the client still owed is cancelled first; only the rest is paid back from the drawer
+      s.refunds = [...(s.refunds || []), { id: uid(), amount, cashOut: amount - owed, reason, by: me().name, at: new Date().toISOString() }]; s.refundTotal = (s.refundTotal || 0) + amount;
       s.status = s.items.every(l => (l.refundedQty || 0) >= l.quantity) ? 'REFUNDED' : 'PARTIALLY_REFUNDED';
       log(d, 'REFUND', s.receiptNumber + ' · ' + fmtKes(amount) + ' · ' + reason); save(d); return wait(s);
     },
@@ -329,6 +349,48 @@ const MockAPI = (() => {
     async backup() { const d = load(), a = actor(d); if (!isSuper(a?.role)) return deny('download a backup');
       (d.system ||= {}).lastBackup = new Date().toISOString(); log(d, 'BACKUP', 'Data backup downloaded'); save(d);
       const copy = structuredClone(d); copy.users.forEach(u => delete u.password); (copy.customers || []).forEach(c => delete c.password); return wait(copy); },
+    /* ---------- Payments and financial tracking (supports tracking; it is not a full accounting system) ---------- */
+    async finance() { const d = load(); if (!can(d, 'payments.view')) return deny('see payments and finance'); return wait(d.fin); },
+    async saveExpense(e) {
+      const d = load(), a = actor(d); if (!can(d, 'expenses.record')) return deny('record expenses');
+      const description = (e.description || '').trim(), reference = (e.reference || '').trim(), at = new Date(e.date);
+      if (!description) return fail('Describe what the money was spent on.'); if (!(e.amount > 0)) return fail('Enter an amount greater than zero.');
+      if (!(e.vat >= 0) || e.vat > e.amount) return fail('VAT cannot be more than the amount.'); if (!PAY_METHODS.includes(e.method)) return fail('Choose how it was paid.');
+      if (e.method !== 'CASH' && !reference) return fail('Enter the payment reference (M-Pesa code, card or bank reference).'); if (isNaN(at) || at > new Date(Date.now() + 864e5)) return fail('Enter a valid date that is not in the future.');
+      const ex = { id: uid(), number: 'EX-' + (++d.fin.seq.exp), description, category: e.category || 'Other', amount: e.amount, vat: e.vat || 0, method: e.method, reference, date: at.toISOString(), status: 'PENDING', by: a.name, byId: a.id };
+      d.fin.expenses.unshift(ex); log(d, 'EXPENSE_ADD', ex.number + ' · ' + ex.category + ' · ' + fmtKes(ex.amount)); save(d); return wait(ex);
+    },
+    async setExpenseStatus(id, status) {
+      const d = load(), a = actor(d); if (!can(d, 'expenses.approve')) return deny('approve expenses');
+      const ex = d.fin.expenses.find(x => x.id === id); if (!ex) return fail('Expense not found.'); if (!['APPROVED', 'REJECTED'].includes(status)) return fail('Unknown status.');
+      if (ex.status !== 'PENDING') return fail('This expense has already been ' + ex.status.toLowerCase() + '.');
+      if (ex.byId === a.id && !isTop(a.role)) return fail('Someone else must approve an expense you recorded.');
+      Object.assign(ex, { status, decidedBy: a.name, decidedAt: new Date().toISOString() }); log(d, status === 'APPROVED' ? 'EXPENSE_OK' : 'EXPENSE_NO', ex.number + ' · ' + fmtKes(ex.amount)); save(d); return wait(ex);
+    },
+    async saveMove(m) {
+      const d = load(); if (!can(d, 'payments.manage')) return deny('record cash movements'); const note = (m.note || '').trim();
+      if (!['CASH_IN', 'CASH_OUT', 'BANK_DEPOSIT'].includes(m.type)) return fail('Choose the type of movement.'); if (!(m.amount > 0)) return fail('Enter an amount greater than zero.'); if (!note) return fail('Give a reason.');
+      d.fin.moves.unshift({ id: uid(), type: m.type, amount: m.amount, note, at: new Date().toISOString(), by: me().name }); log(d, 'CASH_MOVE', m.type.replace('_', ' ').toLowerCase() + ' · ' + fmtKes(m.amount) + ' · ' + note); save(d); return wait({});
+    },
+    async paySupplier({ poId, amount, method, reference }) {
+      const d = load(); if (!can(d, 'payments.manage')) return deny('pay suppliers'); const po = (d.pos || []).find(x => x.id === poId); if (!po) return fail('Purchase order not found.');
+      reference = (reference || '').trim(); if (!PAY_METHODS.includes(method)) return fail('Choose how it was paid.'); if (method !== 'CASH' && !reference) return fail('Enter the payment reference.');
+      const recv = po.items.reduce((t, l) => t + l.received * l.unitCost, 0), paid = d.fin.supplierPayments.filter(p => p.poId === poId).reduce((t, p) => t + p.amount, 0), due = recv - paid;
+      if (!(amount > 0)) return fail('Enter an amount greater than zero.'); if (amount > due) return fail('That is more than the balance due (' + fmtKes(due) + ').');
+      d.fin.supplierPayments.unshift({ id: uid(), number: po.number, poId, supplier: po.supplierName, amount, method, reference, at: new Date().toISOString(), by: me().name });
+      log(d, 'SUPPLIER_PAY', po.number + ' · ' + po.supplierName + ' · ' + fmtKes(amount)); save(d); return wait({});
+    },
+    async recordClientPayment({ saleId, amount, method, reference }) { // a client pays off money they owe from a pay-later sale
+      const d = load(); if (!can(d, 'payments.manage')) return deny('take payments from clients'); const s = d.sales.find(x => x.id === saleId); if (!s) return fail('Sale not found.');
+      reference = (reference || '').trim(); if (!PAY_METHODS.includes(method)) return fail('Choose how it was paid.'); if (method !== 'CASH' && !reference) return fail('Enter the payment reference.');
+      if (!(amount > 0)) return fail('Enter an amount greater than zero.'); if (amount > (s.balance || 0)) return fail('That is more than the balance owed (' + fmtKes(s.balance || 0) + ').');
+      s.balance -= amount; d.fin.clientPayments.unshift({ id: uid(), number: 'CP-' + (++d.fin.seq.cp), saleId, receipt: s.receiptNumber, customerId: s.customerId, customerName: s.customerName, amount, method, reference, at: new Date().toISOString(), by: me().name });
+      log(d, 'CLIENT_PAY', s.receiptNumber + ' · ' + s.customerName + ' paid ' + fmtKes(amount)); save(d); return wait({});
+    },
+    async reconcile(keys) {
+      const d = load(); if (!can(d, 'payments.manage')) return deny('reconcile payments'); if (!Array.isArray(keys) || !keys.length) return fail('Nothing to reconcile.');
+      const now = new Date().toISOString(); keys.forEach(k => { d.fin.recon[k] = { at: now, by: me().name }; }); log(d, 'RECONCILE', keys.length + ' payments marked as reconciled'); save(d); return wait({});
+    },
     async shifts() { const d = load(); if (!can(d, 'reports.view') && !can(d, 'shifts.view')) return deny('see shifts'); return wait(d.shifts); },
   };
 })();

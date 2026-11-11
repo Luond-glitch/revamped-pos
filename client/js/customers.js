@@ -1,7 +1,7 @@
 boot('customers').then(() => { $('#add').onclick = add; load(); });
 async function load() {
   const cs = await API.customers();
-  $('#rows').innerHTML = cs.map(c => `<tr><td>${esc(c.name)}</td><td>${esc(c.phone)}</td><td>${esc(c.email)}</td><td><span class="tag">${c.hasAccount ? 'Has account' : 'Walk-in'}</span></td><td class="n">${c.purchases}</td><td class="n">${fmt(c.spent)}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">No clients yet.</td></tr>';
+  $('#rows').innerHTML = cs.map(c => `<tr><td>${esc(c.name)}</td><td>${esc(c.phone)}</td><td>${esc(c.email)}</td><td><span class="tag">${c.hasAccount ? 'Has account' : 'Walk-in'}</span></td><td class="n">${c.purchases}</td><td class="n">${fmt(c.spent)}</td><td class="n">${c.owes ? `<b class="pm-out">${fmt(c.owes)}</b>` : '—'}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">No clients yet.</td></tr>';
 }
 function add() {
   const d = modal(`<h2>Add walk-in client</h2><label>Name<input id="n" autofocus></label><label>Phone<input id="p" type="tel"></label><label>Email (optional)<input id="e" type="email"></label>

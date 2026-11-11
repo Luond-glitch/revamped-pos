@@ -22,7 +22,7 @@
   const pct = (a, b) => b ? Math.round(a / b * 100) : 0;
   const inRange = (list, a, b) => list.filter(s => { const t = new Date(s.createdAt); return t >= a && t <= b; });
   const lvl = p => p.stock <= 0 ? 'out' : p.stock <= p.reorder ? 'low' : 'ok';
-  const METHOD_LABEL = { CASH: 'Cash', MPESA: 'M-Pesa', CARD: 'Card', SPLIT: 'Split' };
+  const METHOD_LABEL = { CASH: 'Cash', MPESA: 'M-Pesa', CARD: 'Card', BANK: 'Bank transfer', CREDIT: 'Pay later', SPLIT: 'Split' };
   const BRANCHES = { 'branch-1': 'Main branch' };                              // add friendly names here, e.g. 'branch-2': 'Westlands'
   const branchOf = s => s.branchId || CONFIG.BRANCH_ID;
   const branchName = id => BRANCHES[id] || id;
