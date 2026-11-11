@@ -10,7 +10,7 @@
     ['cash', 'Cash movements', 'cash'], ['bal', 'Balances', 'scale'], ['tax', 'VAT and tax', 'percent']];
   const CATS = ['Rent', 'Utilities', 'Transport', 'Salaries & wages', 'Supplies', 'Repairs', 'Marketing', 'Other'];
   const METHODS = { CASH: 'Cash', MPESA: 'M-Pesa', CARD: 'Card', BANK: 'Bank transfer' };
-  const S = { sales: [], pos: [], products: [], fin: { expenses: [], moves: [], recon: {}, supplierPayments: [], clientPayments: [] } }, stmt = {};
+  const S = { sales: [], pos: [], grns: [], products: [], fin: { expenses: [], moves: [], recon: {}, supplierPayments: [], clientPayments: [] } }, stmt = {};
   let U = null, tab = 'overview', ctx = null, view = null, cashOnly = false, sumMode = 'day', txf = 'all';
   PALETTE.splice(0, 6, '#14213d', '#c8941f', '#c62828', '#1f5fd0', '#1f9d55', '#7c3aed'); // navy, gold, red ... like the proposal (this page only)
   
@@ -67,7 +67,7 @@
     $('#dates').hidden = p !== 'custom'; if (p !== 'custom') { $('#from').value = dkey(from); $('#to').value = dkey(now); }
   }
   async function reload(redraw = true) {
-    try { const [sales, fin, pos, products] = await Promise.all([API.sales(), API.finance(), API.purchaseOrders(), API.products()]); Object.assign(S, { sales, fin, pos, products }); } catch (e) { toast(e.message, true); }
+    try { const [sales, fin, pos, products, grns] = await Promise.all([API.sales(), API.finance(), API.purchaseOrders(), API.products(), API.receipts()]); Object.assign(S, { sales, fin, pos, products, grns }); } catch (e) { toast(e.message, true); }
     if (redraw) draw();
   }
   
@@ -148,9 +148,9 @@
   function exportDialog() {
     if (!ctx) return;
     const d = modal(`<h2>Accounting export</h2><p class="sub">For ${esc($('#from').value)} to ${esc($('#to').value)}. Open the file in your accounting software or a spreadsheet. The payment method filter is ignored.</p>
-      <label class="fn-radio"><input type="radio" name="fmt" value="journal" checked><span><b>Journal entries (debit and credit)</b><small>Sales, VAT, refunds, client payments, expenses, supplier payments and cash movements as balanced entries, ready to import as a journal.</small></span></label>
+      <label class="fn-radio"><input type="radio" name="fmt" value="journal" checked><span><b>Journal entries (debit and credit)</b><small>Sales, VAT, refunds, client payments, expenses, authorised goods received, supplier payments and cash movements as balanced entries, ready to import as a journal.</small></span></label>
       <label class="fn-radio"><input type="radio" name="fmt" value="ledger"><span><b>Money in and out (simple list)</b><small>One line per payment, refund, expense or cash movement.</small></span></label>
-      <p class="rp-note">Goods received from suppliers are not part of the journal because their receipt dates are not recorded yet, so book purchases from your supplier invoices.</p>
+      <p class="rp-note">Goods received are booked at their cost when they were authorised. VAT on supplier invoices is not split out, so check it against your supplier invoices.</p>
       <div class="actions"><button data-close>Cancel</button><button class="primary" id="ok">Download CSV</button></div>`);
     $('#ok', d).onclick = () => {
       const f = d.querySelector('[name=fmt]:checked').value;
@@ -262,6 +262,7 @@
     });
     D.fin.clientPayments.filter(c => at(c.at)).forEach(c => add(c.at, c.receipt, 'Client payment: ' + c.customerName, [[A[c.method], c.amount, 0], [A.CREDIT, 0, c.amount]]));
     D.fin.expenses.filter(e => e.status === 'APPROVED' && at(e.date)).forEach(e => add(e.date, e.number || 'Expense', e.description, [['Expense: ' + e.category, e.amount - e.vat, 0], ['VAT input', e.vat, 0], [A[e.method], 0, e.amount]]));
+    (D.grns || []).filter(g => g.status === 'AUTHORISED' && at(g.decidedAt)).forEach(g => add(g.decidedAt, g.number, 'Goods received: ' + g.supplierName, [['Inventory purchases', g.value, 0], ['Accounts payable', 0, g.value]]));
     D.fin.supplierPayments.filter(p => at(p.at)).forEach(p => add(p.at, p.number, 'Supplier payment: ' + p.supplier, [['Accounts payable', p.amount, 0], [A[p.method], 0, p.amount]]));
     D.fin.moves.filter(m => at(m.at)).forEach(m => add(m.at, 'Cash', m.note, m.type === 'CASH_IN' ? [[A.CASH, m.amount, 0], ['Cash float / owner funding', 0, m.amount]] : m.type === 'CASH_OUT' ? [['Cash payouts', m.amount, 0], [A.CASH, 0, m.amount]] : [[A.BANK, m.amount, 0], [A.CASH, 0, m.amount]]));
     R.sort((a, b) => a.t.localeCompare(b.t));

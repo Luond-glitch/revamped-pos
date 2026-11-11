@@ -5,6 +5,24 @@ const toCents = v => Math.round(parseFloat(v || 0) * 100);
 const net = s => s.grandTotal - (s.refundTotal || 0);
 const when = iso => new Date(iso).toLocaleString('en-KE', { dateStyle: 'medium', timeStyle: 'short' });
 
+/* ---------- Light / dark colours: one choice, remembered, used by every page ---------- */
+const THEME_KEY = 'pos_theme';
+const getTheme = () => { try { return localStorage.getItem(THEME_KEY); } catch { return null; } };   // 'light', 'dark' or nothing (follow the device)
+const isDark = () => (document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')) === 'dark';
+const SUN = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>';
+const MOON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
+function paintThemeButtons() { const dark = isDark(); $$('[data-themebtn]').forEach(b => { b.innerHTML = dark ? SUN : MOON; const l = dark ? 'Switch to light mode' : 'Switch to dark mode'; b.title = l; b.setAttribute('aria-label', l); b.setAttribute('aria-pressed', dark); });
+  const m = document.querySelector('meta[name=theme-color]'); if (m && !document.querySelector('.pos')) m.content = dark ? '#0a0f1a' : '#14213d'; }
+function applyTheme(t) { if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme; paintThemeButtons(); }
+const themeButton = () => '<button type="button" class="themebtn" data-themebtn></button>';
+applyTheme(getTheme());
+document.addEventListener('click', e => { if (!e.target.closest('[data-themebtn]')) return; const t = isDark() ? 'light' : 'dark'; try { localStorage.setItem(THEME_KEY, t); } catch {} applyTheme(t); });
+addEventListener('storage', e => { if (e.key === THEME_KEY) applyTheme(e.newValue); });   // another tab changed it
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { if (!getTheme()) paintThemeButtons(); });
+// Pages with no menu bar of their own (home, staff sign-in) get a small floating button
+const floatTheme = () => { if (!document.getElementById('nav') && !document.body.classList.contains('cs-page') && !document.querySelector('[data-themebtn]')) document.body.insertAdjacentHTML('beforeend', '<div class="theme-float">' + themeButton() + '</div>'); paintThemeButtons(); };
+document.readyState === 'loading' ? addEventListener('DOMContentLoaded', floatTheme) : floatTheme();
+
 // [page, label, permission needed to see it]. The server checks permissions again on every request: hiding a link is only a convenience.
 const NAV = [
   ['dashboard', 'Dashboard', 'dashboard.view'], ['pos', 'Checkout', 'pos.use'], ['sales', 'Sales', 'sales.view'], ['products', 'Products', 'products.manage'],
@@ -31,9 +49,9 @@ async function boot(page) {
   try { user = await API.me(); } catch { location.href = 'login.html'; return new Promise(() => {}); }
   const links = NAV.filter(n => can(user, n[2])).map(([id, label]) => `<a href="${id}.html" class="${id === page ? 'on' : ''}">${label}</a>`).join('');
   // .clock is only visible on the Checkout page (see main.css); the nav becomes a top bar there.
-  $('#nav').innerHTML = `<div class="top"><span class="brand">Universal POS</span><span class="clock" id="clock" aria-hidden="true"></span><button id="menu" aria-expanded="false" aria-controls="navlinks" aria-label="Open menu">☰</button></div><div id="navlinks">${links}<div class="who"><span>${esc(user.name)}<small>${esc(ROLE_LABEL[user.role] || user.role)}</small></span><button id="logout">Sign out</button></div></div>`;
+  $('#nav').innerHTML = `<div class="top"><span class="brand">Universal POS</span><span class="clock" id="clock" aria-hidden="true"></span>${themeButton()}<button id="menu" aria-expanded="false" aria-controls="navlinks" aria-label="Open menu">☰</button></div><div id="navlinks">${links}<div class="who"><span>${esc(user.name)}<small>${esc(ROLE_LABEL[user.role] || user.role)}</small></span><button id="logout">Sign out</button></div></div>`;
   const tick = () => { const n = new Date(); $('#clock').textContent = n.toLocaleDateString('en-KE', { weekday: 'short', day: 'numeric', month: 'short' }) + ' · ' + n.toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit', hour12: false }); };
-  tick(); setInterval(tick, 15000);
+  tick(); setInterval(tick, 15000); paintThemeButtons();
   $('#logout').onclick = async () => { await API.logout(); location.href = 'login.html'; };
   const setMenu = open => { $('#nav').classList.toggle('open', open); const m = $('#menu'); m.setAttribute('aria-expanded', open); m.setAttribute('aria-label', open ? 'Close menu' : 'Open menu'); m.textContent = open ? '✕' : '☰'; };
   $('#menu').onclick = () => setMenu(!$('#nav').classList.contains('open')); document.addEventListener('keydown', e => { if (e.key === 'Escape') setMenu(false); });

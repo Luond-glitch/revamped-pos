@@ -1,296 +1,257 @@
-/* Purchasing and supplier management (Module 4).
-   Needs: api.js, purchases-api.js, app.js and analytics.js (for the cards, bars and donut). */
-   const PI = {
-    grid: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>',
-    clip: '<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>',
+/* Module 4: Purchasing and supplier management.
+   Uses helpers from app.js (esc, fmt, when, toast, modal, can, toCents) and analytics.js (statCard, dataTable, hbars, donut, downloadCsv, dkey, money, kes, pct, PALETTE). */
+   const PI = { grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+    cart: '<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 6H6"/>',
     truck: '<rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/>',
-    brief: '<rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>',
-    card: '<rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/>',
-  };
+    compare: '<polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>',
+    file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>',
+    cash: '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 12h.01M18 12h.01"/>',
+    people: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>' };
   const pi = n => `<svg viewBox="0 0 24 24" aria-hidden="true">${PI[n]}</svg>`;
-  const D = d => d ? new Date(String(d).length === 10 ? d + 'T00:00:00' : d).toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
-  const sum = (a, f) => a.reduce((t, x) => t + f(x), 0);
-  const mkey = d => dkey(new Date(d)).slice(0, 7);
-  const TERMS = [[0, 'Cash on delivery'], [7, '7 days'], [14, '14 days'], [30, '30 days'], [60, '60 days']];
-  const OST = { ORDERED: ['low', 'Ordered'], PARTIAL: ['low', 'Part received'], RECEIVED: ['ok', 'Received'], CANCELLED: ['', 'Cancelled'] };
-  const TITLES = { overview: 'Purchasing overview', orders: 'Purchase orders', receiving: 'Goods received', suppliers: 'Suppliers', payables: 'Supplier payments' };
+  const ALLTABS = [['overview', 'Dashboard', 'grid'], ['orders', 'Orders', 'cart'], ['recv', 'Goods received', 'truck'], ['cmp', 'Ordered vs delivered', 'compare'],
+    ['inv', 'Invoices', 'file'], ['pay', 'Payments due', 'cash'], ['sup', 'Suppliers', 'people']];
+  const METHODS = { CASH: 'Cash', MPESA: 'M-Pesa', CARD: 'Card', BANK: 'Bank transfer' };
+  const OSTAT = { ORDERED: ['', 'Ordered'], PARTIAL: ['low', 'Part delivered'], RECEIVED: ['ok', 'Delivered'], CLOSED: ['low', 'Closed short'], CANCELLED: ['out', 'Cancelled'] };
+  const GSTAT = { PENDING: ['low', 'Waiting'], AUTHORISED: ['ok', 'Authorised'], REJECTED: ['out', 'Rejected'] };
+  const S = { sup: [], pos: [], grns: [], inv: [], fin: { supplierPayments: [] }, products: [] };
+  PALETTE.splice(0, 6, '#0f6b66', '#27b5a3', '#f0a91d', '#1f5fd0', '#c62828', '#7c3aed'); // teal, like the proposal (this page only)
+  let U = null, tab = 'overview', ctx = null, view = null, TABS = ALLTABS, gf = 'all', cf = 'open', canPay = false;
   
-  let user, suppliers = [], orders = [], grns = [], payments = [], products = [], tab = 'overview', seePay = false, doPay = false, curRows = [];
-  const flt = { q: '', status: 'all', sup: '', from: '', to: '' };
-  let gQ = '', gSup = '', sQ = '';
+  const opts = o => Object.entries(o).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
+  const sum = (a, f) => a.reduce((t, x) => t + f(x), 0), pill = (c, t) => `<span class="iv-pill ${c}">${t}</span>`, may = p => can(U, p), isTopRole = () => U && (U.role === 'administrator' || U.role === 'super_admin');
+  const panel = (t, s, b, c = '') => `<section class="card iv-panel ${c}"><h2>${t}${s ? ` <small>${s}</small>` : ''}</h2>${b}</section>`;
+  const tbl = (h, rows, tot, msg = 'Nothing to show for these filters.') => rows.length ? `<table>${dataTable(h, rows, tot)}</table>` : `<p class="empty">${msg}</p>`;
+  const dl = rows => `<dl class="rp-dl">${rows.map(([a, b]) => `<div><dt>${a}</dt><dd>${b}</dd></div>`).join('')}</dl>`;
+  const day = iso => iso ? new Date(iso.length === 10 ? iso + 'T12:00:00' : iso).toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+  const today = () => dkey(new Date()), field = (d, id) => $('#' + id, d).value.trim();
   
-  const TABS = () => [['overview', 'Overview', 'grid'], ['orders', 'Purchase orders', 'clip'], ['receiving', 'Goods received', 'truck'], ['suppliers', 'Suppliers', 'brief'], ...(seePay ? [['payables', 'Payables', 'card']] : [])];
+  /* ---------- data shaping ---------- */
+  const supOf = id => S.sup.find(s => s.id === id) || { name: 'Unknown supplier', terms: 30 };
+  const recvVal = o => sum(o.items, l => l.received * l.unitCost), paidOf = o => sum(S.fin.supplierPayments.filter(p => p.poId === o.id), p => p.amount);
+  const invsOf = o => S.inv.filter(i => i.poId === o.id), pendOf = o => S.grns.filter(g => g.poId === o.id && g.status === 'PENDING');
+  const waitQty = (o, pid) => sum(pendOf(o), g => (g.items.find(x => x.productId === pid) || {}).quantity || 0);
+  const isOpen = o => o.status === 'ORDERED' || o.status === 'PARTIAL';
+  const dueInfo = o => { const due = recvVal(o) - paidOf(o), ds = invsOf(o).map(i => i.dueDate).sort()[0]; return { due, ds, late: due > 0 && ds && ds < today(), invoiced: sum(invsOf(o), i => i.amount) }; };
+  const lineState = (l, o) => { const w = waitQty(o, l.productId);
+    if (o.status === 'CANCELLED') return ['', 'Cancelled']; if (l.received >= l.quantity) return ['ok', 'Complete'];
+    if (o.status === 'CLOSED') return ['out', 'Short, closed']; if (l.received > 0) return ['low', 'Part delivered']; if (w > 0) return ['', 'Waiting for authorisation']; return ['', 'Not delivered yet']; };
+  const matchPill = o => { const v = recvVal(o), inv = sum(invsOf(o), i => i.amount); if (!invsOf(o).length) return '<span class="sub">No invoice</span>'; if (!v) return pill('', 'Goods not authorised yet');
+    const d = inv - v; return d === 0 ? pill('ok', 'Matches goods received') : d > 0 ? pill('out', 'Billed ' + fmt(d) + ' more') : pill('low', 'Billed ' + fmt(-d) + ' less'); };
   
-  boot('purchases').then(async u => {
-    user = u; seePay = can(u, 'payments.view'); doPay = can(u, 'payments.manage');
-    const h = location.hash.slice(1); if (TABS().some(t => t[0] === h)) tab = h;
-    document.addEventListener('click', onClick);
-    await load().catch(e => toast(e.message, true));
+  /* ---------- boot ---------- */
+  boot('purchases').then(async user => {
+    U = user; canPay = may('payments.view'); TABS = ALLTABS.filter(t => t[0] !== 'pay' || canPay);
+    $('#tabs').innerHTML = TABS.map(([k, l, i]) => `<button type="button" role="tab" data-t="${k}">${pi(i)}<span>${l}</span></button>`).join('');
+    $('#addpo').hidden = !may('purchases.manage'); setRange('all'); await reload(false);
+    $('#range').onchange = e => { setRange(e.target.value); draw(); }; $('#from').onchange = $('#to').onchange = $('#supplier').onchange = draw;
+    const h = location.hash.slice(1); if (TABS.some(t => t[0] === h)) tab = h;
+    $('#tabs').onclick = e => { const b = e.target.closest('[data-t]'); if (b) { tab = b.dataset.t; history.replaceState(null, '', '#' + tab); drawView(); } };
+    addEventListener('hashchange', () => { const x = location.hash.slice(1); if (TABS.some(t => t[0] === x) && x !== tab) { tab = x; drawView(); } });
+    $('#csv').onclick = () => view && downloadCsv('purchases-' + view.csv.name, view.csv.rows); $('#print').onclick = () => window.print(); $('#addpo').onclick = newOrder; $('#view').onclick = onAction;
+    draw();
   });
-  
-  async function load() {
-    [suppliers, orders, products, grns] = await Promise.all([API.suppliers(), API.purchaseOrders(), API.products(), API.goodsReceived()]);
-    payments = seePay ? ((await API.finance().catch(() => null))?.supplierPayments || []) : [];
-    render();
+  function setRange(p) {
+    const now = new Date(); let from = new Date(2000, 0, 1);
+    if (p === '30') from = new Date(now - 29 * 864e5); else if (p === '90') from = new Date(now - 89 * 864e5); else if (p === 'year') from = new Date(now.getFullYear(), 0, 1);
+    $('#dates').hidden = p !== 'custom'; if (p !== 'custom') { $('#from').value = dkey(from); $('#to').value = dkey(now); }
+  }
+  async function reload(redraw = true) {
+    try {
+      const [sup, pos, grns, inv, products] = await Promise.all([API.suppliers(), API.purchaseOrders(), API.receipts(), API.invoices(), API.products()]); Object.assign(S, { sup, pos, grns, inv, products });
+      if (canPay) S.fin = await API.finance();
+    } catch (e) { toast(e.message, true); }
+    const cur = $('#supplier').value; $('#supplier').innerHTML = '<option value="">All suppliers</option>' + S.sup.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join(''); $('#supplier').value = S.sup.some(s => s.id === cur) ? cur : '';
+    if (redraw) draw();
+  }
+  function draw() {
+    const f = $('#from').value, t = $('#to').value; if (!f || !t) return;
+    const from = new Date(f + 'T00:00:00'), to = new Date(t + 'T23:59:59.999'); if (from > to) return toast('The start date is after the end date.', true);
+    const sid = $('#supplier').value, within = iso => { const d = new Date(iso.length === 10 ? iso + 'T12:00:00' : iso); return d >= from && d <= to; }, mine = x => !sid || x.supplierId === sid;
+    const O = S.pos.filter(o => mine(o) && within(o.createdAt)), G = S.grns.filter(g => mine(g) && within(g.at)), I = S.inv.filter(i => mine(i) && within(i.date));
+    const allO = S.pos.filter(mine); ctx = { from, to, sid, within, mine, O, G, I, allO };
+    const open = allO.filter(isOpen), openVal = sum(open, o => sum(o.items, l => (l.quantity - l.received) * l.unitCost)), wait = S.grns.filter(g => mine(g) && g.status === 'PENDING');
+    const real = O.filter(o => o.status !== 'CANCELLED'), ordQ = sum(real, o => sum(o.items, l => l.quantity)), delQ = sum(real, o => sum(o.items, l => l.received)), owed = sum(allO.map(dueInfo), x => x.due), late = allO.map(dueInfo).filter(x => x.late);
+    $('#stats').innerHTML = [
+      statCard('blue', 'box', 'Open orders', String(open.length), fmt(openVal) + ' still to receive'),
+      statCard('amber', 'alert', 'Waiting for authorisation', String(wait.length), fmt(sum(wait, g => g.value)) + ' of goods'),
+      canPay ? statCard('red', 'dollar', 'Owed to suppliers', fmt(owed), late.length ? late.length + ' past the due date' : 'nothing overdue') : statCard('red', 'dollar', 'Invoiced', fmt(sum(I, i => i.amount)), I.length + ' invoices'),
+      statCard('green', 'trend', 'Delivered vs ordered', pct(delQ, ordQ) + '%', delQ + ' of ' + ordQ + ' units'),
+    ].join('');
+    $('#pmeta').textContent = f + ' to ' + t + (sid ? ' · ' + supOf(sid).name : '') + ' · printed ' + when(new Date().toISOString()); drawView();
+  }
+  function drawView() {
+    if (!ctx) return; $$('#tabs button').forEach(b => { const on = b.dataset.t === tab; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); });
+    $('#ptitle').textContent = TABS.find(t => t[0] === tab)[1]; view = VIEWS[tab](); $('#view').innerHTML = view.html;
   }
   
-  /* ---------- derived numbers for every order ---------- */
-  function enrich() {
-    const sup = new Map(suppliers.map(s => [s.id, s])), paid = new Map(), first = new Map();
-    payments.forEach(p => paid.set(p.poId, (paid.get(p.poId) || 0) + p.amount));
-    grns.slice().reverse().forEach(g => { if (!first.has(g.poId)) first.set(g.poId, g.at); });          // first delivery of each order
-    orders.forEach(o => {
-      o.units = sum(o.items, l => l.quantity); o.delivered = sum(o.items, l => l.received); o.recv = sum(o.items, l => l.received * l.unitCost);
-      o.paid = paid.get(o.id) || 0; o.bal = o.status === 'CANCELLED' ? 0 : o.recv - o.paid;
-      const terms = sup.get(o.supplierId)?.terms ?? 30; o.due = addDays(new Date(first.get(o.id) || o.createdAt), terms);
-      o.overdue = o.bal > 0 ? Math.floor((Date.now() - o.due) / 864e5) : 0;
-      o.late = (o.status === 'ORDERED' || o.status === 'PARTIAL') && o.expectedDate && new Date(o.expectedDate + 'T23:59:59') < new Date();
-    });
+  /* ---------- actions ---------- */
+  async function onAction(e) {
+    const b = e.target.closest('[data-a]'); if (!b) return; const a = b.dataset.a, id = b.dataset.id;
+    try {
+      if (a === 'po') return newOrder(); if (a === 'addsup') return editSupplier({}); if (a === 'editsup') return editSupplier(S.sup.find(s => s.id === id)); if (a === 'recv') return receive(S.pos.find(o => o.id === id));
+      if (a === 'view') return showOrder(S.pos.find(o => o.id === id)); if (a === 'cancel') return reasonDialog('Cancel ' + S.pos.find(o => o.id === id).number, 'Why is it cancelled?', 'Cancel order', r => API.cancelPurchaseOrder(id, r), 'Order cancelled');
+      if (a === 'close') return reasonDialog('Close ' + S.pos.find(o => o.id === id).number + ' short', 'The supplier will not deliver the rest. Why?', 'Close order', r => API.closePurchaseOrder(id, r), 'Order closed');
+      if (a === 'inv') return recordInvoice(id); if (a === 'pay') return paySupplier(id); if (a === 'gf') { gf = b.dataset.v; return drawView(); } if (a === 'cf') { cf = b.dataset.v; return drawView(); }
+      if (a === 'ok') { await API.authoriseReceipt(id, 'AUTHORISED'); toast('Goods authorised. Stock updated.'); return reload(); }
+      if (a === 'no') return reasonDialog('Reject ' + S.grns.find(g => g.id === id).number, 'Why are the goods rejected (damaged, wrong items…)?', 'Reject goods', r => API.authoriseReceipt(id, 'REJECTED', r), 'Goods rejected');
+    } catch (err) { toast(err.message, true); }
   }
-  
-  function render() {
-    enrich(); const T = TABS(); if (!T.some(t => t[0] === tab)) tab = 'overview';
-    $('#tabs').innerHTML = T.map(([k, l, ic]) => `<button type="button" role="tab" aria-selected="${k === tab}" class="${k === tab ? 'on' : ''}" data-act="tab" data-id="${k}">${pi(ic)}<span>${l}</span></button>`).join('');
-    $('#title').textContent = TITLES[tab];
-    $('#tools').innerHTML = (tab !== 'overview' ? '<button type="button" data-act="csv">Export CSV</button>' : '') + '<button type="button" data-act="addsup">Add supplier</button><button type="button" class="pu-gold" data-act="newpo">New purchase order</button>';
-    ({ overview: vOverview, orders: vOrders, receiving: vReceiving, suppliers: vSuppliers, payables: vPayables })[tab]();
+  function reasonDialog(title, ask, btn, run, done) {
+    const d = modal(`<h2>${esc(title)}</h2><label>${esc(ask)}<input id="rs" autofocus autocomplete="off"></label><div class="actions"><button data-close>Back</button><button class="danger" id="ok">${esc(btn)}</button></div>`);
+    $('#ok', d).onclick = async () => { try { await run(field(d, 'rs')); d.close(); toast(done); reload(); } catch (e) { toast(e.message, true); } };
   }
-  function setTab(t) { tab = t; history.replaceState(null, '', '#' + t); render(); window.scrollTo({ top: 0 }); }
-  
-  function onClick(e) {
-    const b = e.target.closest('[data-act]'); if (!b) return;
-    const id = b.dataset.id, o = () => orders.find(x => x.id === id), s = () => suppliers.find(x => x.id === id);
-    const A = { tab: () => setTab(id), newpo: () => newOrder(b.dataset.sup), addsup: () => editSupplier({}), editsup: () => editSupplier(s()), receive: () => receive(o()), pay: () => payOrder(o()),
-      cancel: () => cancelOrder(o()), view: () => viewOrder(o()), stmt: () => statement(s()), csv: exportCsv };
-    b.closest('dialog')?.close(); A[b.dataset.act]?.();
-  }
-  
-  const pill = (t, l) => `<span class="iv-pill ${t}">${esc(l)}</span>`;
-  const prog = o => { const p = o.units ? Math.round(o.delivered / o.units * 100) : 0; return `<div class="pu-prog" role="img" aria-label="${p}% delivered"><i class="${p >= 100 ? 'full' : ''}" style="width:${p}%"></i></div><small>${o.delivered} of ${o.units} units</small>`; };
-  const dueCell = o => o.bal <= 0 ? '—' : o.overdue > 0 ? pill('out', o.overdue + (o.overdue === 1 ? ' day overdue' : ' days overdue')) : `${D(o.due)}${o.overdue > -8 ? ' ' + pill('low', 'due soon') : ''}`;
-  const openOrders = () => orders.filter(o => o.status === 'ORDERED' || o.status === 'PARTIAL');
-  
-  /* =====================================================================  OVERVIEW  */
-  function vOverview() {
-    const open = openOrders(), awaiting = sum(open, o => o.units - o.delivered), owing = orders.filter(o => o.bal > 0), owed = sum(owing, o => o.bal), overdue = owing.filter(o => o.overdue > 0);
-    const now = new Date(), m0 = mkey(now), m1 = mkey(new Date(now.getFullYear(), now.getMonth() - 1, 1)), rec = m => sum(grns.filter(g => mkey(g.at) === m), g => g.value);
-    const active = new Set(orders.filter(o => o.status !== 'CANCELLED' && Date.now() - new Date(o.createdAt) < 90 * 864e5).map(o => o.supplierId)).size;
-    const cards = [statCard('blue', 'box', 'Open orders', open.length, `${awaiting} units awaiting delivery`),
-      seePay ? statCard('red', 'alert', 'Owed to suppliers', fmt(owed), `${overdue.length} overdue`) : statCard('amber', 'receipt', 'Ordered this month', fmt(sum(orders.filter(o => o.status !== 'CANCELLED' && mkey(o.createdAt) === m0), o => o.total)), 'order value'),
-      statCard('green', 'receipt', 'Received this month', fmt(rec(m0)), delta(rec(m0), rec(m1), 'last month')),
-      statCard('amber', 'users', 'Active suppliers', active, `${suppliers.length} registered`)];
-  
-    // purchases by month: ordered vs received, last 6 months
-    const months = [...Array(6)].map((_, i) => new Date(now.getFullYear(), now.getMonth() - 5 + i, 1));
-    const rows = months.map(m => { const k = mkey(m); return { label: m.toLocaleDateString('en-KE', { month: 'short' }), long: m.toLocaleDateString('en-KE', { month: 'long', year: 'numeric' }),
-      a: sum(orders.filter(o => o.status !== 'CANCELLED' && mkey(o.createdAt) === k), o => o.total), b: rec(k) }; });
-    const max = Math.max(1, ...rows.map(r => Math.max(r.a, r.b))) * 1.1;
-    const chart = rows.some(r => r.a || r.b) ? `<div class="pu-chart" role="img" aria-label="Ordered and received value for the last 6 months"><div class="pu-plot"><div class="pu-y"><span>${kes(max)}</span><span>${kes(max / 2)}</span></div>
-      <div class="pu-cols">${rows.map(r => `<div class="pu-col" title="${esc(r.long)}: ordered ${esc(fmt(r.a))}, received ${esc(fmt(r.b))}"><i class="a" style="height:${(r.a / max * 100).toFixed(1)}%"></i><i class="b" style="height:${(r.b / max * 100).toFixed(1)}%"></i></div>`).join('')}</div></div>
-      <div class="pu-x">${rows.map(r => `<span>${esc(r.label)}</span>`).join('')}</div></div>
-      <div class="iv-legend"><span><i style="background:var(--pu-a)"></i>Ordered <b>${fmt(sum(rows, r => r.a))}</b></span><span><i style="background:var(--pu-b)"></i>Received <b>${fmt(sum(rows, r => r.b))}</b></span></div>` : '<p class="empty">No purchases yet. Create your first purchase order.</p>';
-  
-    // spend by supplier (goods received)
-    const by = new Map(); orders.forEach(o => o.recv && by.set(o.supplierName, (by.get(o.supplierName) || 0) + o.recv));
-    const top = [...by].sort((a, b) => b[1] - a[1]), items = top.slice(0, 4).map(([label, value]) => ({ label, value })); if (top.length > 4) items.push({ label: 'Other suppliers', value: sum(top.slice(4), x => x[1]) });
-  
-    // ordered vs delivered
-    const list = open.slice().sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)).slice(0, 6);
-    const dlv = list.length ? `<ul class="iv-list">${list.map(o => `<li><div class="nm"><b>${esc(o.number)} · ${esc(o.supplierName)}</b><small>${o.delivered} of ${o.units} units delivered${o.expectedDate ? ' · expected ' + D(o.expectedDate) : ''} ${o.late ? pill('out', 'Late') : ''}</small>
-      <div class="pu-prog"><i style="width:${o.units ? Math.round(o.delivered / o.units * 100) : 0}%"></i></div></div><button type="button" data-act="receive" data-id="${o.id}">Receive</button></li>`).join('')}</ul>${open.length > 6 ? `<button type="button" class="iv-link" data-act="tab" data-id="orders">See all ${open.length} open orders</button>` : ''}`
-      : '<p class="empty">Nothing is waiting for delivery.</p>';
-  
-    // payables ageing
-    const bucket = [['Not yet due', o => o.overdue <= 0, 'ok'], ['1–30 days overdue', o => o.overdue >= 1 && o.overdue <= 30, 'low'], ['31–60 days overdue', o => o.overdue > 30 && o.overdue <= 60, 'low'], ['Over 60 days', o => o.overdue > 60, 'out']]
-      .map(([label, f, tone]) => ({ label, tone, value: sum(owing.filter(f), o => o.bal) }));
-    const recent = grns.slice(0, 5);
-  
-    $('#view').innerHTML = `<div class="rp-kpis" style="--cols:4">${cards.join('')}</div>
-    <div class="iv-grid">
-      <section class="card iv-panel span2" aria-labelledby="h1"><h2 id="h1">Purchases by month <small>ordered vs received</small></h2>${chart}</section>
-      <section class="card iv-panel" aria-labelledby="h2"><h2 id="h2">Spend by supplier <small>goods received</small></h2>${donut(items, { big: kes(sum(items, i => i.value)), small: 'received' })}</section>
-      <section class="card iv-panel span2" aria-labelledby="h3"><h2 id="h3">Ordered vs delivered <small>open orders, oldest first</small></h2>${dlv}</section>
-      ${seePay ? `<section class="card iv-panel" aria-labelledby="h4"><h2 id="h4">Payables ageing <small>unpaid supplier balances</small></h2>${owed ? hbars(bucket, i => fmt(i.value)) : '<p class="empty">No unpaid balances.</p>'}<button type="button" class="iv-link" data-act="tab" data-id="payables">Open payables</button></section>` : ''}
-      <section class="card iv-panel span3" aria-labelledby="h5"><h2 id="h5">Recently received <small>goods-received notes</small></h2>${recent.length ? `<ul class="iv-list">${recent.map(g => `<li><div class="nm"><b>${esc(g.number)} · ${esc(g.supplierName)}</b><small>${D(g.at)} · ${esc(g.poNumber)} · ${sum(g.items, l => l.quantity)} units${g.invoiceNo ? ' · invoice ' + esc(g.invoiceNo) : ''}</small></div><b>${fmt(g.value)}</b></li>`).join('')}</ul>` : '<p class="empty">No goods received yet.</p>'}</section>
-    </div>`;
-  }
-  
-  /* =====================================================================  PURCHASE ORDERS  */
-  function vOrders() {
-    $('#view').innerHTML = `<div class="card iv-panel"><div class="pu-filters">
-      <label>Search<input id="fq" type="search" placeholder="Order number, supplier or reference" value="${esc(flt.q)}" autocomplete="off"></label>
-      <label>Supplier<select id="fs"><option value="">All suppliers</option>${suppliers.map(s => `<option value="${s.id}" ${flt.sup === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>
-      <label>From<input id="ff" type="date" value="${flt.from}"></label><label>To<input id="ft" type="date" value="${flt.to}"></label></div>
-      <div class="iv-chips pu-chips" id="fc" role="group" aria-label="Filter by status"></div>
-      <table><thead><tr><th>Order</th><th>Supplier</th><th>Ordered</th><th>Expected</th><th>Delivered</th><th class="n">Value</th>${seePay ? '<th class="n">Balance due</th>' : ''}<th>Status</th><th></th></tr></thead><tbody id="obody"></tbody></table>
-      <p class="rp-note" id="ocount" style="margin:10px 0 0"></p></div>`;
-    $('#fq').oninput = e => { flt.q = e.target.value; drawOrders(); }; $('#fs').onchange = e => { flt.sup = e.target.value; drawOrders(); };
-    $('#ff').onchange = e => { flt.from = e.target.value; drawOrders(); }; $('#ft').onchange = e => { flt.to = e.target.value; drawOrders(); };
-    $('#fc').onclick = e => { const b = e.target.closest('[data-s]'); if (b) { flt.status = b.dataset.s; drawOrders(); } };
-    drawOrders();
-  }
-  const orderMatch = (o, status) => status === 'all' || (status === 'unpaid' ? o.bal > 0 : o.status === status);
-  function drawOrders() {
-    const q = flt.q.trim().toLowerCase(), f = flt.from ? new Date(flt.from + 'T00:00:00') : null, t = flt.to ? new Date(flt.to + 'T23:59:59.999') : null;
-    const base = orders.filter(o => (!flt.sup || o.supplierId === flt.sup) && (!q || [o.number, o.supplierName, o.reference].some(x => (x || '').toLowerCase().includes(q))) && (!f || new Date(o.createdAt) >= f) && (!t || new Date(o.createdAt) <= t));
-    const list = curRows = base.filter(o => orderMatch(o, flt.status));
-    const chips = [['all', 'All'], ['ORDERED', 'Awaiting delivery'], ['PARTIAL', 'Part received'], ['RECEIVED', 'Received'], ...(seePay ? [['unpaid', 'Unpaid']] : []), ['CANCELLED', 'Cancelled']];
-    $('#fc').innerHTML = chips.map(([k, l]) => `<button type="button" data-s="${k}" class="${flt.status === k ? 'on' : ''}" aria-pressed="${flt.status === k}">${l} <small>${base.filter(o => orderMatch(o, k)).length}</small></button>`).join('');
-    $('#obody').innerHTML = list.map(o => { const [tn, l] = OST[o.status] || ['', o.status], openO = o.status === 'ORDERED' || o.status === 'PARTIAL';
-      return `<tr><td><b>${esc(o.number)}</b>${o.reference ? `<br><small>${esc(o.reference)}</small>` : ''}</td><td>${esc(o.supplierName)}</td><td>${D(o.createdAt)}</td><td>${o.expectedDate ? D(o.expectedDate) + (o.late ? ' ' + pill('out', 'Late') : '') : '—'}</td>
-      <td>${o.status === 'CANCELLED' ? '—' : prog(o)}</td><td class="n">${fmt(o.total)}</td>${seePay ? `<td class="n ${o.bal > 0 ? 'pu-due' : ''}">${o.bal > 0 ? fmt(o.bal) : '—'}</td>` : ''}<td>${pill(tn, l)}</td>
-      <td class="row"><button data-act="view" data-id="${o.id}">View</button>${openO ? `<button class="primary" data-act="receive" data-id="${o.id}">Receive</button>` : ''}${doPay && o.bal > 0 ? `<button data-act="pay" data-id="${o.id}">Pay</button>` : ''}${o.status === 'ORDERED' && !o.delivered ? `<button class="danger" data-act="cancel" data-id="${o.id}">Cancel</button>` : ''}</td></tr>`; }).join('')
-      || `<tr><td colspan="${seePay ? 9 : 8}" class="empty">${orders.length ? 'No orders match.' : 'No purchase orders yet. Create the first one.'}</td></tr>`;
-    $('#ocount').textContent = `${list.length} of ${orders.length} orders · total value ${fmt(sum(list.filter(o => o.status !== 'CANCELLED'), o => o.total))}`;
-  }
-  
-  /* =====================================================================  GOODS RECEIVED  */
-  function vReceiving() {
-    const open = openOrders();
-    $('#view').innerHTML = `<section class="card iv-panel"><h2>Awaiting delivery <small>${open.length} open order${open.length === 1 ? '' : 's'}</small></h2>${open.length ? `<ul class="iv-list">${open.map(o => `<li><div class="nm"><b>${esc(o.number)} · ${esc(o.supplierName)}</b><small>${o.delivered} of ${o.units} units · ${o.expectedDate ? 'expected ' + D(o.expectedDate) : 'no date set'} ${o.late ? pill('out', 'Late') : ''}</small></div><button type="button" class="primary" data-act="receive" data-id="${o.id}">Receive goods</button></li>`).join('')}</ul>` : '<p class="empty">Nothing is waiting for delivery.</p>'}</section>
-    <div class="card iv-panel"><h2>Goods-received notes</h2><div class="pu-filters two"><label>Search<input id="gq" type="search" placeholder="GRN, order, invoice number or supplier" value="${esc(gQ)}" autocomplete="off"></label>
-      <label>Supplier<select id="gs"><option value="">All suppliers</option>${suppliers.map(s => `<option value="${s.id}" ${gSup === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label></div>
-      <table><thead><tr><th>Note</th><th>Received</th><th>Order</th><th>Supplier</th><th class="n">Units</th><th class="n">Value</th><th>Supplier invoice</th><th>Invoice check</th><th>By</th></tr></thead><tbody id="gbody"></tbody></table></div>`;
-    $('#gq').oninput = e => { gQ = e.target.value; drawGrns(); }; $('#gs').onchange = e => { gSup = e.target.value; drawGrns(); }; drawGrns();
-  }
-  function drawGrns() {
-    const q = gQ.trim().toLowerCase(), list = curRows = grns.filter(g => (!gSup || g.supplierId === gSup) && (!q || [g.number, g.poNumber, g.invoiceNo, g.supplierName].some(x => (x || '').toLowerCase().includes(q))));
-    $('#gbody').innerHTML = list.map(g => { const diff = g.invoiceAmount - g.value;
-      return `<tr><td><b>${esc(g.number)}</b></td><td>${when(g.at)}</td><td>${esc(g.poNumber)}</td><td>${esc(g.supplierName)}</td><td class="n">${sum(g.items, l => l.quantity)}</td><td class="n">${fmt(g.value)}</td>
-      <td>${g.invoiceNo ? `${esc(g.invoiceNo)}<br><small>${D(g.invoiceDate)}${g.invoiceAmount ? ' · ' + fmt(g.invoiceAmount) : ''}</small>` : '<small>not recorded</small>'}</td>
-      <td>${!g.invoiceAmount ? '<small>—</small>' : diff === 0 ? pill('ok', 'Matches') : pill('out', (diff > 0 ? 'Invoice +' : 'Invoice −') + fmt(Math.abs(diff)))}</td><td>${esc(g.by)}</td></tr>`; }).join('')
-      || `<tr><td colspan="9" class="empty">${grns.length ? 'No notes match.' : 'No goods received yet. Receive goods from an open order.'}</td></tr>`;
-  }
-  
-  /* =====================================================================  SUPPLIERS  */
-  function vSuppliers() {
-    $('#view').innerHTML = `<div class="card iv-panel"><div class="pu-filters two"><label>Search<input id="sq" type="search" placeholder="Name, contact person, phone or email" value="${esc(sQ)}" autocomplete="off"></label></div>
-      <table><thead><tr><th>Supplier</th><th>Contact</th><th>Terms</th><th class="n">Orders</th><th class="n">Received</th>${seePay ? '<th class="n">Owed</th>' : ''}<th>Last order</th><th></th></tr></thead><tbody id="sbody"></tbody></table></div>`;
-    $('#sq').oninput = e => { sQ = e.target.value; drawSuppliers(); }; drawSuppliers();
-  }
-  const termLabel = t => (TERMS.find(x => x[0] === (t ?? 30)) || [0, (t ?? 30) + ' days'])[1];
-  function drawSuppliers() {
-    const q = sQ.trim().toLowerCase(), list = curRows = suppliers.filter(s => !q || [s.name, s.contact, s.phone, s.email].some(x => (x || '').toLowerCase().includes(q)));
-    $('#sbody').innerHTML = list.map(s => { const os = orders.filter(o => o.supplierId === s.id && o.status !== 'CANCELLED'), last = os[0], owed = sum(os, o => o.bal);
-      return `<tr><td><b>${esc(s.name)}</b>${s.contact ? `<br><small>${esc(s.contact)}</small>` : ''}</td><td>${s.phone ? esc(s.phone) : '—'}${s.email ? `<br><small>${esc(s.email)}</small>` : ''}</td><td>${esc(termLabel(s.terms))}</td>
-      <td class="n">${os.length}</td><td class="n">${fmt(sum(os, o => o.recv))}</td>${seePay ? `<td class="n ${owed > 0 ? 'pu-due' : ''}">${owed > 0 ? fmt(owed) : '—'}</td>` : ''}<td>${last ? D(last.createdAt) : '—'}</td>
-      <td class="row"><button data-act="newpo" data-sup="${s.id}">New order</button><button data-act="stmt" data-id="${s.id}">Statement</button><button data-act="editsup" data-id="${s.id}">Edit</button></td></tr>`; }).join('')
-      || `<tr><td colspan="${seePay ? 8 : 7}" class="empty">${suppliers.length ? 'No suppliers match.' : 'Add your first supplier.'}</td></tr>`;
-  }
-  
-  /* =====================================================================  PAYABLES  */
-  function vPayables() {
-    const owing = orders.filter(o => o.bal > 0).sort((a, b) => a.due - b.due), owed = sum(owing, o => o.bal), od = owing.filter(o => o.overdue > 0), soon = owing.filter(o => o.overdue <= 0 && o.overdue > -8);
-    const m = mkey(new Date()), paidM = sum(payments.filter(p => mkey(p.at) === m), p => p.amount);
-    curRows = owing;
-    $('#view').innerHTML = `<div class="rp-kpis" style="--cols:4">${statCard('red', 'alert', 'Total owed', fmt(owed), `${owing.length} unpaid order${owing.length === 1 ? '' : 's'}`)}${statCard('red', 'alert', 'Overdue', fmt(sum(od, o => o.bal)), `${od.length} order${od.length === 1 ? '' : 's'}`)}
-      ${statCard('amber', 'receipt', 'Due within 7 days', fmt(sum(soon, o => o.bal)), `${soon.length} order${soon.length === 1 ? '' : 's'}`)}${statCard('green', 'dollar', 'Paid this month', fmt(paidM), `${payments.filter(p => mkey(p.at) === m).length} payments`)}</div>
-    <div class="card iv-panel"><h2>Outstanding balances <small>money owed for goods already received</small></h2><table><thead><tr><th>Order</th><th>Supplier</th><th class="n">Received value</th><th class="n">Paid</th><th class="n">Balance</th><th>Due</th><th></th></tr></thead><tbody>
-      ${owing.map(o => `<tr><td><b>${esc(o.number)}</b></td><td>${esc(o.supplierName)}</td><td class="n">${fmt(o.recv)}</td><td class="n">${o.paid ? fmt(o.paid) : '—'}</td><td class="n pu-due">${fmt(o.bal)}</td><td>${dueCell(o)}</td>
-      <td class="row"><button data-act="view" data-id="${o.id}">View</button>${doPay ? `<button class="primary" data-act="pay" data-id="${o.id}">Pay</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">No unpaid balances. All received goods are paid for.</td></tr>'}</tbody></table></div>
-    <div class="card iv-panel"><h2>Payment history</h2><table><thead><tr><th>Date</th><th>Order</th><th>Supplier</th><th>Method</th><th>Reference</th><th class="n">Amount</th><th>By</th></tr></thead><tbody>
-      ${payments.map(p => `<tr><td>${when(p.at)}</td><td>${esc(p.number)}</td><td>${esc(p.supplier)}</td><td>${esc(METHOD_LABEL[p.method] || p.method)}</td><td>${esc(p.reference || '—')}</td><td class="n">${fmt(p.amount)}</td><td>${esc(p.by)}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">No payments recorded yet.</td></tr>'}</tbody></table></div>`;
-  }
-  
-  /* =====================================================================  EXPORTS  */
-  function exportCsv() {
-    const k = c => money(c);
-    if (tab === 'orders') downloadCsv('purchase-orders', [['Order', 'Supplier', 'Reference', 'Ordered', 'Expected', 'Status', 'Units ordered', 'Units delivered', 'Order value (KES)', 'Received value (KES)', 'Paid (KES)', 'Balance (KES)'],
-      ...curRows.map(o => [o.number, o.supplierName, o.reference || '', dkey(new Date(o.createdAt)), o.expectedDate || '', (OST[o.status] || ['', o.status])[1], o.units, o.delivered, k(o.total), k(o.recv), seePay ? k(o.paid) : '', seePay ? k(o.bal) : ''])]);
-    else if (tab === 'receiving') downloadCsv('goods-received', [['Note', 'Received', 'Order', 'Supplier', 'Units', 'Value (KES)', 'Invoice no.', 'Invoice date', 'Invoice amount (KES)', 'Received by', 'Note'],
-      ...curRows.map(g => [g.number, new Date(g.at).toISOString(), g.poNumber, g.supplierName, sum(g.items, l => l.quantity), k(g.value), g.invoiceNo, g.invoiceDate, g.invoiceAmount ? k(g.invoiceAmount) : '', g.by, g.note || ''])]);
-    else if (tab === 'suppliers') downloadCsv('suppliers', [['Supplier', 'Contact person', 'Phone', 'Email', 'Address', 'KRA PIN', 'Payment terms', 'Orders', 'Received value (KES)', 'Owed (KES)'],
-      ...curRows.map(s => { const os = orders.filter(o => o.supplierId === s.id && o.status !== 'CANCELLED'); return [s.name, s.contact || '', s.phone, s.email, s.address || '', s.pin || '', termLabel(s.terms), os.length, k(sum(os, o => o.recv)), seePay ? k(sum(os, o => o.bal)) : '']; })]);
-    else if (tab === 'payables') downloadCsv('supplier-payables', [['Order', 'Supplier', 'Received value (KES)', 'Paid (KES)', 'Balance (KES)', 'Due date', 'Days overdue'], ...curRows.map(o => [o.number, o.supplierName, k(o.recv), k(o.paid), k(o.bal), dkey(o.due), Math.max(0, o.overdue)])]);
-  }
-  
-  /* =====================================================================  DIALOGS  */
-  const optionsOf = arr => arr.map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('');
-  
   function editSupplier(s) {
-    const d = modal(`<h2>${s.id ? 'Edit supplier' : 'Add supplier'}</h2><div class="pu-form">
-      <label class="w2">Supplier name<input id="n" value="${esc(s.name)}" autofocus></label><label>Contact person<input id="c" value="${esc(s.contact)}"></label><label>Phone<input id="p" type="tel" value="${esc(s.phone)}"></label>
-      <label>Email<input id="e" type="email" value="${esc(s.email)}"></label><label>KRA PIN<input id="k" value="${esc(s.pin)}" autocomplete="off"></label>
-      <label class="w2">Address<input id="a" value="${esc(s.address)}"></label><label>Payment terms<select id="t">${optionsOf(TERMS)}</select></label><label>Notes<input id="o" value="${esc(s.notes)}"></label></div>
+    const d = modal(`<h2>${s.id ? 'Edit supplier' : 'Add supplier'}</h2><label>Business name<input id="n" value="${esc(s.name)}" autofocus></label><label>Contact person<input id="c" value="${esc(s.contact)}"></label>
+      <div class="row"><label class="grow">Phone<input id="p" type="tel" value="${esc(s.phone)}"></label><label class="grow">Email<input id="e" type="email" value="${esc(s.email)}"></label></div>
+      <label>Address<input id="a" value="${esc(s.address)}"></label><div class="row"><label class="grow">KRA PIN<input id="k" value="${esc(s.pin)}" autocomplete="off"></label><label class="grow">Payment terms (days)<input id="t" type="number" min="0" max="365" value="${s.terms ?? 30}"></label></div>
+      ${s.id ? `<label class="fn-radio"><input type="checkbox" id="st" ${s.status === 'inactive' ? '' : 'checked'}><span><b>Active supplier</b><small>Switched-off suppliers cannot be ordered from. Their history stays.</small></span></label>` : ''}
       <div class="actions"><button data-close>Cancel</button><button class="primary" id="ok">Save supplier</button></div>`);
-    $('#t', d).value = String(s.terms ?? 30);
-    $('#ok', d).onclick = async () => { try { await API.saveSupplier({ ...s, name: $('#n', d).value, contact: $('#c', d).value, phone: $('#p', d).value, email: $('#e', d).value, pin: $('#k', d).value, address: $('#a', d).value, terms: $('#t', d).value, notes: $('#o', d).value });
-      d.close(); toast('Supplier saved'); load(); } catch (e) { toast(e.message, true); } };
+    $('#ok', d).onclick = async () => { try { await API.saveSupplier({ ...s, name: field(d, 'n'), contact: field(d, 'c'), phone: field(d, 'p'), email: field(d, 'e'), address: field(d, 'a'), pin: field(d, 'k'), terms: field(d, 't'), status: s.id && !$('#st', d).checked ? 'inactive' : 'active' }); d.close(); toast('Supplier saved'); reload(); } catch (e) { toast(e.message, true); } };
   }
-  
-  function newOrder(supId) {
-    if (!suppliers.length) { toast('Add a supplier first.', true); return editSupplier({}); }
-    const opts = products.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
-    const line = `<div class="row ln" style="flex-wrap:nowrap;margin-bottom:8px"><select class="p" style="flex:2" aria-label="Product">${opts}</select><input class="q" type="number" min="1" value="1" placeholder="Qty" style="flex:1" aria-label="Quantity"><input class="c" type="number" min="0" step="0.01" placeholder="Unit cost (KES)" style="flex:1" aria-label="Unit cost KES"><button class="x" aria-label="Remove line">×</button></div>`;
-    const d = modal(`<h2>New purchase order</h2><div class="pu-form"><label>Supplier<select id="sup">${suppliers.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></label>
-      <label>Expected delivery<input id="exp" type="date" value="${dkey(addDays(new Date(), 7))}"></label><label>Supplier reference / quote no.<input id="ref" autocomplete="off"></label><label>Notes<input id="nt"></label></div>
-      <div class="row sub" style="flex-wrap:nowrap;margin:0 0 6px"><span style="flex:2">Product</span><span style="flex:1">Qty</span><span style="flex:1">Unit cost (KES)</span><span style="width:34px"></span></div>
-      <div id="lns"></div><div class="row"><button id="al" type="button">Add line</button><button id="low" type="button">Add low-stock items</button></div><p><b id="tot"></b></p>
-      <div class="actions"><button data-close>Cancel</button><button class="primary" id="ok">Place order</button></div>`);
-    d.style.width = 'min(680px,94vw)'; if (supId) $('#sup', d).value = supId;
-    const cost = ln => { ln.querySelector('.c').value = (products.find(p => p.id === ln.querySelector('.p').value).cost / 100).toFixed(2); };
-    const total = () => { $('#tot', d).textContent = 'Order total: ' + fmt(sum($$('.ln', d), l => (parseInt($('.q', l).value, 10) || 0) * toCents($('.c', l).value))); };
-    const addLine = (pid, qty) => { $('#lns', d).insertAdjacentHTML('beforeend', line); const l = $('#lns', d).lastElementChild; if (pid) $('.p', l).value = pid; if (qty) $('.q', l).value = qty; cost(l); total(); };
-    d.addEventListener('input', total);
-    d.addEventListener('change', e => { if (e.target.matches('.p')) { cost(e.target.closest('.ln')); total(); } });
-    d.addEventListener('click', e => { if (e.target.matches('.x')) { e.target.closest('.ln').remove(); total(); } });
-    $('#al', d).onclick = () => addLine();
-    $('#low', d).onclick = () => { const need = products.filter(p => p.trackStock !== false && p.stock <= p.reorder); if (!need.length) return toast('No product is at or below its reorder level.');
-      const have = new Set($$('.ln .p', d).map(s => s.value)); need.filter(p => !have.has(p.id)).forEach(p => addLine(p.id, Math.max(1, p.reorder * 2 - p.stock))); };
-    addLine();
-    $('#ok', d).onclick = async () => { try { await API.createPurchaseOrder({ supplierId: $('#sup', d).value, expectedDate: $('#exp', d).value, reference: $('#ref', d).value, notes: $('#nt', d).value,
-        items: $$('.ln', d).map(l => ({ productId: $('.p', l).value, quantity: parseInt($('.q', l).value, 10), unitCost: toCents($('.c', l).value) })) });
-      d.close(); toast('Purchase order placed'); load(); } catch (e) { toast(e.message, true); } };
+  function newOrder() {
+    const act = S.sup.filter(s => s.status !== 'inactive'); if (!act.length) return toast('Add a supplier first.', true);
+    const opts2 = S.products.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+    const line = `<div class="pu-ln ln"><select class="p" aria-label="Product">${opts2}</select><input class="q" type="number" min="1" step="1" value="1" placeholder="Qty" aria-label="Quantity"><input class="c" type="number" min="0" step="0.01" placeholder="Unit cost (KES)" aria-label="Unit cost KES"><button type="button" class="x" aria-label="Remove line">×</button></div>`;
+    const d = modal(`<h2>New purchase order</h2><div class="row"><label class="grow">Supplier<select id="sup">${act.map(s => `<option value="${s.id}"${s.id === ctx.sid ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>
+      <label class="grow">Expected delivery<input id="ex" type="date" min="${today()}"></label></div>
+      <div class="pu-ln pu-head sub"><span>Product</span><span>Qty</span><span>Unit cost (KES)</span><span></span></div><div id="lns"></div><button type="button" id="al">Add line</button>
+      <label style="margin-top:12px">Note for the supplier (optional)<input id="nt" autocomplete="off"></label><p><b id="tot"></b></p><div class="actions"><button data-close>Cancel</button><button class="primary" id="ok">Place order</button></div>`);
+    d.style.width = 'min(660px,94vw)';
+    const cost = ln => { ln.querySelector('.c').value = (S.products.find(p => p.id === ln.querySelector('.p').value).cost / 100).toFixed(2); };
+    const total = () => { $('#tot', d).textContent = 'Order total: ' + fmt($$('.ln', d).reduce((t, l) => t + (parseInt($('.q', l).value, 10) || 0) * toCents($('.c', l).value), 0)); };
+    const add = () => { $('#lns', d).insertAdjacentHTML('beforeend', line); cost($('#lns', d).lastElementChild); total(); };
+    d.addEventListener('input', total); d.addEventListener('change', e => { if (e.target.matches('.p')) { cost(e.target.closest('.ln')); total(); } });
+    d.addEventListener('click', e => { if (e.target.matches('.x')) { if ($$('.ln', d).length > 1) e.target.closest('.ln').remove(); total(); } });
+    $('#al', d).onclick = add; add();
+    $('#ok', d).onclick = async () => { try { await API.createPurchaseOrder({ supplierId: $('#sup', d).value, expected: $('#ex', d).value, note: field(d, 'nt'),
+        items: $$('.ln', d).map(l => ({ productId: $('.p', l).value, quantity: +$('.q', l).value, unitCost: toCents($('.c', l).value) })) }); d.close(); toast('Purchase order placed'); reload(); } catch (e) { toast(e.message, true); } };
   }
-  
   function receive(o) {
-    if (!o.items.some(l => l.quantity > l.received)) return toast('Everything on this order has been received.', true);
-    const d = modal(`<h2>Receive goods: ${esc(o.number)}</h2><p class="sub">${esc(o.supplierName)}. Received stock is added to inventory and the product cost is updated.</p>
-      ${o.items.map((l, i) => { const left = l.quantity - l.received; return `<div class="line" style="grid-template-columns:1fr 90px"><div>${esc(l.name)}<br><small>${l.received} of ${l.quantity} delivered · ${left} still expected · ${fmt(l.unitCost)} each</small></div>
-        <input type="number" min="0" max="${left}" value="${left}" data-i="${i}" ${left ? '' : 'disabled'} aria-label="Quantity received for ${esc(l.name)}"></div>`; }).join('')}
-      <div class="pu-form" style="margin-top:12px"><label>Supplier invoice no.<input id="inv" autocomplete="off"></label><label>Invoice date<input id="invd" type="date" value="${dkey(new Date())}"></label>
-        <label>Invoice amount (KES)<input id="inva" type="number" min="0" step="0.01"></label><label>Note<input id="note" placeholder="e.g. 2 cartons damaged"></label></div>
-      <p><b id="rv"></b><br><small id="rw"></small></p><div class="actions"><button data-close>Cancel</button><button class="primary" id="ok">Receive stock</button></div>`);
-    const qty = () => $$('[data-i]', d).map(i => ({ productId: o.items[i.dataset.i].productId, quantity: parseInt(i.value, 10) || 0, cost: o.items[i.dataset.i].unitCost }));
-    const check = () => { const v = sum(qty(), x => x.quantity * x.cost), inv = toCents($('#inva', d).value); $('#rv', d).textContent = 'Value of this delivery: ' + fmt(v);
-      $('#rw', d).textContent = inv && inv !== v ? `The invoice is ${fmt(Math.abs(inv - v))} ${inv > v ? 'higher' : 'lower'} than the order cost. Check it with the supplier.` : ''; };
-    d.addEventListener('input', check); check();
-    $('#ok', d).onclick = async () => { try { await API.receivePurchaseOrder(o.id, { items: qty().map(({ productId, quantity }) => ({ productId, quantity })), invoiceNo: $('#inv', d).value, invoiceDate: $('#invd', d).value, invoiceAmount: toCents($('#inva', d).value), note: $('#note', d).value });
-      d.close(); toast('Stock received'); load(); } catch (e) { toast(e.message, true); } };
+    const d = modal(`<h2>Record goods received: ${esc(o.number)}</h2><p class="sub">${esc(o.supplierName)}. Count what actually arrived. Stock is added only after a manager authorises this record.</p>
+      <div class="pu-rl pu-head sub"><span>Product</span><span>Still expected</span><span>Delivered now</span></div>
+      ${o.items.map((l, i) => { const left = l.quantity - l.received - waitQty(o, l.productId); return `<div class="pu-rl"><span>${esc(l.name)}<small>ordered ${l.quantity} · ${fmt(l.unitCost)} each</small></span><span>${left}</span>
+        <input type="number" min="0" max="${left}" step="1" value="${left}" data-i="${i}" ${left ? '' : 'disabled'} aria-label="Delivered now: ${esc(l.name)}"></div>`; }).join('')}
+      <div class="row"><label class="grow">Supplier delivery note no.<input id="dn" autocomplete="off"></label><label class="grow">Note (damage, shortage…)<input id="nt" autocomplete="off"></label></div>
+      <div class="actions"><button data-close>Cancel</button><button class="primary" id="ok">Save goods received</button></div>`);
+    d.style.width = 'min(620px,94vw)';
+    $('#ok', d).onclick = async () => { try { await API.receivePurchaseOrder(o.id, { deliveryNote: field(d, 'dn'), note: field(d, 'nt'), items: $$('[data-i]', d).map(i => ({ productId: o.items[i.dataset.i].productId, quantity: parseInt(i.value, 10) || 0 })) });
+      d.close(); toast(may('purchases.approve') ? 'Recorded. Authorise it under Goods received.' : 'Recorded. A manager must authorise it before stock changes.'); reload(); } catch (e) { toast(e.message, true); } };
   }
-  
-  function payOrder(o) {
-    const d = modal(`<h2>Pay supplier</h2><p class="sub">${esc(o.supplierName)} · ${esc(o.number)} · balance ${fmt(o.bal)}</p>
-      <label>Amount (KES)<input id="am" type="number" min="0" step="0.01" value="${(o.bal / 100).toFixed(2)}" autofocus></label><label>Paid by<select id="by">${optionsOf(PAY_METHODS.map(m => [m, METHOD_LABEL[m] || m]))}</select></label>
-      <label id="rf" hidden>Reference (M-Pesa code, bank or card reference)<input id="rv" autocomplete="off"></label><div class="actions"><button data-close>Cancel</button><button class="primary" id="ok">Record payment</button></div>`);
-    const sync = () => $('#rf', d).hidden = $('#by', d).value === 'CASH'; $('#by', d).onchange = sync; sync();
-    $('#ok', d).onclick = async () => { try { await API.paySupplier({ poId: o.id, amount: toCents($('#am', d).value), method: $('#by', d).value, reference: $('#rv', d).value }); d.close(); toast('Payment recorded'); load(); } catch (e) { toast(e.message, true); } };
+  function recordInvoice(poId) {
+    const list = S.pos.filter(o => o.status !== 'CANCELLED' && (!ctx.sid || o.supplierId === ctx.sid)); if (!list.length) return toast('There are no orders to invoice yet.', true);
+    const d = modal(`<h2>Record supplier invoice</h2><label>Purchase order<select id="po">${list.map(o => `<option value="${o.id}"${o.id === poId ? ' selected' : ''}>${esc(o.number)} · ${esc(o.supplierName)} · ${fmt(o.total)}</option>`).join('')}</select></label>
+      <div class="row"><label class="grow">Supplier's invoice number<input id="no" autocomplete="off" autofocus></label><label class="grow">Invoice date<input id="dt" type="date" value="${today()}" max="${today()}"></label></div>
+      <div class="row"><label class="grow">Invoice total (KES)<input id="am" type="number" min="0" step="0.01"></label><label class="grow">VAT included (KES)<input id="vt" type="number" min="0" step="0.01" value="0"></label></div>
+      <label>Due date (blank = supplier's payment terms)<input id="du" type="date"></label><label>Note (optional)<input id="nt" autocomplete="off"></label><p class="sub" id="hint"></p>
+      <div class="actions"><button data-close>Cancel</button><button class="primary" id="ok">Save invoice</button></div>`);
+    const hint = () => { const o = S.pos.find(x => x.id === $('#po', d).value), v = recvVal(o), am = toCents($('#am', d).value), dif = am - v;
+      $('#hint', d).textContent = 'Goods received and authorised on this order: ' + fmt(v) + (am ? (dif === 0 ? '. The invoice matches.' : dif > 0 ? '. The invoice is ' + fmt(dif) + ' more than the goods received.' : '. The invoice is ' + fmt(-dif) + ' less than the goods received.') : '.'); };
+    d.addEventListener('input', hint); hint();
+    $('#ok', d).onclick = async () => { try { await API.saveInvoice({ poId: $('#po', d).value, number: field(d, 'no'), date: $('#dt', d).value, dueDate: $('#du', d).value, amount: toCents($('#am', d).value), vat: toCents($('#vt', d).value), note: field(d, 'nt') }); d.close(); toast('Invoice recorded'); reload(); } catch (e) { toast(e.message, true); } };
   }
-  
-  function cancelOrder(o) {
-    const d = modal(`<h2>Cancel ${esc(o.number)}?</h2><p class="sub">${esc(o.supplierName)} · ${fmt(o.total)}. Only orders with nothing received can be cancelled.</p><label>Reason (required)<input id="why" autofocus></label>
-      <div class="actions"><button data-close>Keep order</button><button class="primary" id="ok">Cancel order</button></div>`);
-    $('#ok', d).onclick = async () => { try { await API.cancelPurchaseOrder(o.id, $('#why', d).value); d.close(); toast('Order cancelled'); load(); } catch (e) { toast(e.message, true); } };
+  function paySupplier(id) {
+    const o = S.pos.find(x => x.id === id), due = recvVal(o) - paidOf(o); if (!o) return;
+    const d = modal(`<h2>Pay ${esc(o.supplierName)}</h2><p class="sub">${esc(o.number)} · balance due ${fmt(due)}</p><label>Amount (KES)<input id="am" type="number" min="0" step="0.01" value="${(due / 100).toFixed(2)}" autofocus></label>
+      <label>Paid by<select id="mt">${opts(METHODS)}</select></label><label>Reference (needed unless cash)<input id="rf" autocomplete="off"></label><div class="actions"><button data-close>Cancel</button><button class="primary" id="ok">Record payment</button></div>`);
+    $('#ok', d).onclick = async () => { try { await API.paySupplier({ poId: id, amount: toCents($('#am', d).value), method: field(d, 'mt'), reference: field(d, 'rf') }); d.close(); toast('Payment recorded'); reload(); } catch (e) { toast(e.message, true); } };
   }
-  
-  function viewOrder(o) {
-    const [tn, l] = OST[o.status] || ['', o.status], notes = grns.filter(g => g.poId === o.id), pays = payments.filter(p => p.poId === o.id), openO = o.status === 'ORDERED' || o.status === 'PARTIAL';
-    const d = modal(`<h2>${esc(o.number)} ${pill(tn, l)}</h2><p class="sub">${esc(o.supplierName)} · ordered ${D(o.createdAt)} by ${esc(o.by || '')}${o.expectedDate ? ' · expected ' + D(o.expectedDate) : ''}${o.reference ? ' · ref ' + esc(o.reference) : ''}</p>
-      ${o.notes ? `<p>${esc(o.notes)}</p>` : ''}${o.status === 'CANCELLED' ? `<p class="rp-note">Cancelled by ${esc(o.cancelledBy || '')}: ${esc(o.cancelReason || '')}</p>` : ''}
-      <table><thead><tr><th>Product</th><th class="n">Ordered</th><th class="n">Delivered</th><th class="n">Still due</th><th class="n">Unit cost</th><th class="n">Line value</th></tr></thead><tbody>
-      ${o.items.map(i => `<tr><td>${esc(i.name)}</td><td class="n">${i.quantity}</td><td class="n">${i.received}</td><td class="n ${i.quantity > i.received && o.status !== 'CANCELLED' ? 'pu-due' : ''}">${o.status === 'CANCELLED' ? '—' : i.quantity - i.received}</td><td class="n">${fmt(i.unitCost)}</td><td class="n">${fmt(i.quantity * i.unitCost)}</td></tr>`).join('')}</tbody></table>
-      <dl class="rp-dl" style="margin-top:12px"><div><dt>Order value</dt><dd>${fmt(o.total)}</dd></div><div><dt>Received value</dt><dd>${fmt(o.recv)}</dd></div>${seePay ? `<div><dt>Paid</dt><dd>${fmt(o.paid)}</dd></div><div><dt>Balance due</dt><dd>${fmt(o.bal)}</dd></div>` : ''}</dl>
-      ${notes.length ? `<h3 style="margin:14px 0 6px;font-size:.95rem">Goods received</h3><ul class="iv-list">${notes.map(g => `<li><div class="nm"><b>${esc(g.number)} · ${D(g.at)}</b><small>${sum(g.items, x => x.quantity)} units${g.invoiceNo ? ' · invoice ' + esc(g.invoiceNo) : ''}${g.note ? ' · ' + esc(g.note) : ''}</small></div><b>${fmt(g.value)}</b></li>`).join('')}</ul>` : ''}
-      ${pays.length ? `<h3 style="margin:14px 0 6px;font-size:.95rem">Payments</h3><ul class="iv-list">${pays.map(p => `<li><div class="nm"><b>${esc(METHOD_LABEL[p.method] || p.method)}${p.reference ? ' · ' + esc(p.reference) : ''}</b><small>${when(p.at)} · ${esc(p.by)}</small></div><b>${fmt(p.amount)}</b></li>`).join('')}</ul>` : ''}
-      <div class="actions"><button data-close>Close</button>${doPay && o.bal > 0 ? `<button data-act="pay" data-id="${o.id}">Record payment</button>` : ''}${openO ? `<button class="primary" data-act="receive" data-id="${o.id}">Receive goods</button>` : ''}</div>`);
+  function showOrder(o) {
+    if (!o) return; const di = dueInfo(o), gs = S.grns.filter(g => g.poId === o.id), pays = S.fin.supplierPayments.filter(p => p.poId === o.id), st = OSTAT[o.status];
+    const d = modal(`<h2>${esc(o.number)} <span class="iv-pill ${st[0]}">${st[1]}</span></h2><p class="sub">${esc(o.supplierName)} · ordered ${esc(when(o.createdAt))} by ${esc(o.by)}${o.expected ? ' · expected ' + esc(day(o.expected)) : ''}${o.note ? '<br>Note: ' + esc(o.note) : ''}${o.closedReason ? '<br>' + (o.status === 'CANCELLED' ? 'Cancelled' : 'Closed short') + ' by ' + esc(o.closedBy) + ': ' + esc(o.closedReason) : ''}</p>
+      ${tbl(['Product', 'Ordered', 'Delivered', 'Waiting', 'Outstanding', 'Unit cost'], o.items.map(l => { const w = waitQty(o, l.productId); return [esc(l.name), l.quantity, l.received, w || '—', o.status === 'CLOSED' || o.status === 'CANCELLED' ? '—' : l.quantity - l.received - w, fmt(l.unitCost)]; }), ['Order total', '', '', '', '', fmt(o.total)])}
+      <h3 class="pu-h3">Goods received</h3>${gs.length ? `<ul class="iv-list">${gs.map(g => `<li><div class="nm"><b>${esc(g.number)} · ${fmt(g.value)}</b><small>${esc(when(g.at))} by ${esc(g.by)}${g.deliveryNote ? ' · note ' + esc(g.deliveryNote) : ''}${g.decision ? ' · ' + esc(g.decision) : ''}</small></div>${pill(...GSTAT[g.status])}</li>`).join('')}</ul>` : '<p class="sub">Nothing recorded yet.</p>'}
+      <h3 class="pu-h3">Money</h3>${dl([['Received value (authorised goods)', fmt(recvVal(o))], ['Invoiced by supplier', fmt(di.invoiced) + ' ' + (invsOf(o).length ? '' : '')], ['Invoice check', matchPill(o)], ...(canPay ? [['Paid so far', fmt(paidOf(o))], ['<b>Balance due</b>', `<b>${fmt(di.due)}</b>`]] : [])])}
+      ${invsOf(o).length ? `<ul class="iv-list">${invsOf(o).map(i => `<li><div class="nm"><b>Invoice ${esc(i.number)} · ${fmt(i.amount)}</b><small>${esc(day(i.date))}, due ${esc(day(i.dueDate))}</small></div></li>`).join('')}</ul>` : ''}
+      ${pays.length ? `<ul class="iv-list">${pays.map(p => `<li><div class="nm"><b>Paid ${fmt(p.amount)}</b><small>${esc(METHODS[p.method] || p.method)}${p.reference ? ' · ' + esc(p.reference) : ''} · ${esc(when(p.at))}</small></div></li>`).join('')}</ul>` : ''}
+      <div class="actions"><button data-close>Close</button></div>`);
     d.style.width = 'min(680px,94vw)';
   }
   
-  function statement(s) {
-    const os = orders.filter(o => o.supplierId === s.id && o.status !== 'CANCELLED');
-    const d = modal(`<h2>${esc(s.name)}</h2><p class="sub">${[s.contact, s.phone, s.email].filter(Boolean).map(esc).join(' · ') || 'No contact details yet'}${s.address ? '<br>' + esc(s.address) : ''}${s.pin ? '<br>KRA PIN ' + esc(s.pin) : ''}<br>Payment terms: ${esc(termLabel(s.terms))}</p>
-      <dl class="rp-dl"><div><dt>Orders</dt><dd>${os.length}</dd></div><div><dt>Goods received</dt><dd>${fmt(sum(os, o => o.recv))}</dd></div>${seePay ? `<div><dt>Paid</dt><dd>${fmt(sum(os, o => o.paid))}</dd></div><div><dt>Balance owed</dt><dd>${fmt(sum(os, o => o.bal))}</dd></div>` : ''}</dl>
-      ${os.length ? `<table style="margin-top:12px"><thead><tr><th>Order</th><th>Date</th><th class="n">Received</th>${seePay ? '<th class="n">Balance</th>' : ''}<th>Status</th></tr></thead><tbody>${os.map(o => `<tr><td>${esc(o.number)}</td><td>${D(o.createdAt)}</td><td class="n">${fmt(o.recv)}</td>${seePay ? `<td class="n">${o.bal > 0 ? fmt(o.bal) : '—'}</td>` : ''}<td>${pill(...(OST[o.status] || ['', o.status]))}</td></tr>`).join('')}</tbody></table>` : ''}
-      ${s.notes ? `<p class="rp-note" style="margin-top:10px">${esc(s.notes)}</p>` : ''}<div class="actions"><button data-close>Close</button><button class="primary" data-act="newpo" data-sup="${s.id}">New order</button></div>`);
-    d.style.width = 'min(640px,94vw)';
+  /* ---------- views ---------- */
+  const spark = rows => { // columns for the last 6 months of authorised goods (teal bars)
+    const now = new Date(), b = []; for (let k = 5; k >= 0; k--) { const m0 = new Date(now.getFullYear(), now.getMonth() - k, 1), m1 = new Date(now.getFullYear(), now.getMonth() - k + 1, 1);
+      b.push({ label: m0.toLocaleDateString('en-KE', { month: 'short' }), long: m0.toLocaleDateString('en-KE', { month: 'long', year: 'numeric' }), v: sum(rows.filter(g => { const d = new Date(g.decidedAt); return d >= m0 && d < m1; }), g => g.value) }); }
+    if (!b.some(x => x.v)) return '<p class="empty">No goods have been authorised in the last 6 months.</p>';
+    const max = Math.max(1, ...b.map(x => x.v)) * 1.1;
+    return `<div class="rp-scroll"><div class="rp-chart" style="min-width:${b.length * 46}px" role="img" aria-label="Purchases by month, total ${esc(fmt(sum(b, x => x.v)))}"><div class="rp-plot"><div class="rp-y"><span>${kes(max)}</span><span>${kes(max / 2)}</span></div>
+      <div class="rp-bars">${b.map(x => `<div class="rp-col" title="${esc(x.long)}: ${esc(fmt(x.v))}"><i style="height:${(x.v / max * 100).toFixed(1)}%;min-height:${x.v > 0 ? 3 : 0}px"></i></div>`).join('')}</div></div>
+      <div class="rp-x" style="grid-template-columns:repeat(${b.length},1fr)">${b.map(x => `<span>${esc(x.label)}</span>`).join('')}</div></div></div><div class="iv-legend"><span><i style="background:var(--pu)"></i>Authorised goods</span><span>Amounts in KES</span></div>`;
+  };
+  const orderActions = o => [`<button data-a="view" data-id="${o.id}">View</button>`, isOpen(o) && may('purchases.manage') ? `<button class="primary" data-a="recv" data-id="${o.id}">Receive</button>` : ''].join(' ');
+  const ordRow = o => { const st = OSTAT[o.status], late = isOpen(o) && o.expected && o.expected < today(); return [`<b>${esc(o.number)}</b>`, esc(o.supplierName), day(o.createdAt), o.expected ? esc(day(o.expected)) + (late ? ' ' + pill('out', 'Late') : '') : '—', pill(...st), fmt(o.total), fmt(recvVal(o)), orderActions(o)]; };
+  const ordHead = ['Order', 'Supplier', 'Ordered', 'Expected', 'Status', 'Order value', 'Received value', ''];
+  
+  function vOverview() {
+    const real = ctx.O.filter(o => o.status !== 'CANCELLED'), auth = S.grns.filter(g => ctx.mine(g) && g.status === 'AUTHORISED'), inR = auth.filter(g => ctx.within(g.decidedAt));
+    const by = new Map(); inR.forEach(g => by.set(g.supplierName, (by.get(g.supplierName) || 0) + g.value));
+    const spend = [...by].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([label, value], i) => ({ label, value, tone: ['', 'ok', 'low', ''][i % 4] }));
+    const lines = real.flatMap(o => o.items.map(l => lineState(l, o)[1])), cnt = k => lines.filter(x => x === k).length;
+    const dv = [['Complete', cnt('Complete')], ['Part delivered', cnt('Part delivered')], ['Waiting for authorisation', cnt('Waiting for authorisation')], ['Not delivered yet', cnt('Not delivered yet')], ['Short, closed', cnt('Short, closed')]].filter(x => x[1]).map(([label, value]) => ({ label, value }));
+    const ow = new Map(); ctx.allO.forEach(o => { const x = dueInfo(o); if (x.due > 0) ow.set(o.supplierName, (ow.get(o.supplierName) || 0) + x.due); });
+    const owItems = [...ow].sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value })), wait = S.grns.filter(g => ctx.mine(g) && g.status === 'PENDING'), late = ctx.allO.filter(o => isOpen(o) && o.expected && o.expected < today());
+    const canOk = g => may('purchases.approve') && (g.byId !== U.id || isTopRole());
+    const attn = [...wait.map(g => `<li><div class="nm"><b>${esc(g.number)} · ${esc(g.supplierName)}</b><small>${fmt(g.value)} recorded ${esc(when(g.at))} by ${esc(g.by)}</small></div>${canOk(g) ? `<span class="pu-btns"><button class="primary" data-a="ok" data-id="${g.id}">Authorise</button></span>` : pill('low', 'Waiting')}</li>`),
+      ...late.map(o => `<li><div class="nm"><b>${esc(o.number)} · ${esc(o.supplierName)}</b><small>Expected ${esc(day(o.expected))}, not fully delivered</small></div>${pill('out', 'Late')}</li>`)];
+    return { csv: { name: 'overview', rows: [['Supplier', 'Authorised goods in period (KES)'], ...[...by].map(([n, v]) => [n, money(v)]), [], ['Open orders', ctx.allO.filter(isOpen).length], ['Waiting for authorisation', wait.length]] },
+      html: `<div class="iv-grid rp-dense">${panel('Purchases by month', 'authorised goods, last 6 months', spark(auth), 'span2')}
+        ${panel('Needs attention', attn.length + (attn.length === 1 ? ' item' : ' items'), attn.length ? `<ul class="iv-list">${attn.slice(0, 6).join('')}</ul>` : '<p class="empty">Nothing is waiting.</p>')}
+        ${panel('Spend by supplier', 'authorised goods in these dates', spend.length ? hbars(spend, i => fmt(i.value)) : '<p class="empty">No goods authorised in these dates.</p>')}
+        ${panel('Delivery performance', 'order lines in these dates', dv.length ? donut(dv, { big: String(lines.length), small: 'lines' }, v => String(v)) : '<p class="empty">No orders in these dates.</p>')}
+        ${canPay ? panel('Outstanding payments', 'owed to suppliers', owItems.length ? donut(owItems.slice(0, 5), { big: 'KES ' + kes(sum(owItems, x => x.value)), small: 'to pay' }) : '<p class="empty">Nothing is owed.</p>') : panel('Latest invoices', '', ctx.I.length ? `<ul class="iv-list">${ctx.I.slice(0, 5).map(i => `<li><div class="nm"><b>${esc(i.supplierName)}</b><small>${esc(i.number)} · ${esc(day(i.date))}</small></div><b class="rp-amt">${fmt(i.amount)}</b></li>`).join('')}</ul>` : '<p class="empty">No invoices yet.</p>')}
+        ${panel('Latest purchase orders', 'newest 6', tbl(ordHead, ctx.O.slice(0, 6).map(ordRow), null, 'No purchase orders in these dates.'), 'span3')}</div>` };
   }
+  function vOrders() {
+    const F = { open: ['Open', o => isOpen(o)], all: ['All', () => true], done: ['Delivered', o => o.status === 'RECEIVED'], end: ['Closed or cancelled', o => o.status === 'CLOSED' || o.status === 'CANCELLED'] }, list = ctx.O.filter(F[cf][1]);
+    return { csv: { name: 'orders', rows: [['Order', 'Supplier', 'Ordered', 'Expected', 'Status', 'Order value (KES)', 'Received value (KES)', 'Raised by'], ...list.map(o => [o.number, o.supplierName, o.createdAt.slice(0, 10), o.expected || '', OSTAT[o.status][1], money(o.total), money(recvVal(o)), o.by])] },
+      html: panel('Purchase orders', list.length + ' shown', `<div class="pm-bar rp-noprint"><div class="iv-chips grow">${Object.entries(F).map(([k, [l, f]]) => `<button type="button" data-a="cf" data-v="${k}" class="${k === cf ? 'on' : ''}">${l} <small>${ctx.O.filter(f).length}</small></button>`).join('')}</div></div>`
+        + tbl(ordHead, list.map(o => { const r = ordRow(o); r[7] = r[7] + (may('purchases.manage') && o.status === 'ORDERED' ? ` <button class="danger" data-a="cancel" data-id="${o.id}">Cancel</button>` : '') + (may('purchases.approve') && o.status === 'PARTIAL' ? ` <button data-a="close" data-id="${o.id}">Close short</button>` : ''); return r; }),
+          ['Total', '', '', '', '', fmt(sum(list, o => o.total)), fmt(sum(list, recvVal)), ''], 'No purchase orders match.')) };
+  }
+  function vRecv() {
+    const F = { all: ['All', () => true], PENDING: ['Waiting', g => g.status === 'PENDING'], AUTHORISED: ['Authorised', g => g.status === 'AUTHORISED'], REJECTED: ['Rejected', g => g.status === 'REJECTED'] }, list = ctx.G.filter(F[gf][1]);
+    const canOk = g => may('purchases.approve') && (g.byId !== U.id || isTopRole());
+    return { csv: { name: 'goods-received', rows: [['Record', 'Order', 'Supplier', 'Delivery note', 'Recorded', 'Recorded by', 'Value (KES)', 'Status', 'Decided by', 'Decision note'], ...list.map(g => [g.number, g.poNumber, g.supplierName, g.deliveryNote, g.at.slice(0, 10), g.by, money(g.value), GSTAT[g.status][1], g.decidedBy || '', g.decision || ''])] },
+      html: panel('Goods-received records', list.length + ' shown. Stock changes only when a record is authorised.', `<div class="iv-chips rp-noprint" style="margin-bottom:12px">${Object.entries(F).map(([k, [l, f]]) => `<button type="button" data-a="gf" data-v="${k}" class="${k === gf ? 'on' : ''}">${l} <small>${ctx.G.filter(f).length}</small></button>`).join('')}</div>`
+        + tbl(['Record', 'Supplier', 'Recorded', 'Items', 'Value', 'Status', ''], list.map(g => [`<b>${esc(g.number)}</b><br><small>${esc(g.poNumber)}</small>`, esc(g.supplierName) + (g.deliveryNote ? `<br><small>Delivery note ${esc(g.deliveryNote)}</small>` : ''), esc(when(g.at)) + `<br><small>by ${esc(g.by)}</small>`,
+          g.items.map(i => esc(i.name) + ' × ' + i.quantity).join('<br>') + (g.note ? `<br><small>${esc(g.note)}</small>` : ''), fmt(g.value), pill(...GSTAT[g.status]) + (g.status !== 'PENDING' ? `<br><small>${esc(g.decidedBy)}${g.decision ? ': ' + esc(g.decision) : ''}</small>` : ''),
+          g.status === 'PENDING' ? (canOk(g) ? `<button class="primary" data-a="ok" data-id="${g.id}">Authorise</button> <button class="danger" data-a="no" data-id="${g.id}">Reject</button>` : '<small>Someone else must authorise</small>') : '']),
+          ['Total', '', '', '', fmt(sum(list, g => g.value)), '', ''], 'No goods-received records yet. Use "Receive" on an order.')) };
+  }
+  function vCmp() {
+    const rows = ctx.O.filter(o => o.status !== 'CANCELLED').flatMap(o => o.items.map(l => ({ o, l, w: waitQty(o, l.productId), st: lineState(l, o) }))), ord = sum(rows, r => r.l.quantity), del = sum(rows, r => r.l.received), sd = new Map();
+    rows.forEach(r => { const x = sd.get(r.o.supplierName) || { n: new Set(), q: 0, d: 0 }; x.n.add(r.o.id); x.q += r.l.quantity; x.d += r.l.received; sd.set(r.o.supplierName, x); });
+    const sup = [...sd].map(([n, x]) => ({ label: n, value: pct(x.d, x.q), tone: pct(x.d, x.q) >= 95 ? 'ok' : pct(x.d, x.q) >= 70 ? 'low' : 'out' })), short = rows.filter(r => r.l.received < r.l.quantity && (r.o.status === 'CLOSED'));
+    return { csv: { name: 'ordered-vs-delivered', rows: [['Order', 'Supplier', 'Product', 'Ordered', 'Delivered', 'Waiting authorisation', 'Difference', 'Status'], ...rows.map(r => [r.o.number, r.o.supplierName, r.l.name, r.l.quantity, r.l.received, r.w, r.l.received - r.l.quantity, r.st[1]])] },
+      html: `<div class="iv-grid rp-dense">${panel('Delivery rate by supplier', 'units delivered of units ordered', sup.length ? hbars(sup, i => i.value + '%') : '<p class="empty">No orders in these dates.</p>')}
+        ${panel('Summary', 'orders in these dates', dl([['Units ordered', String(ord)], ['Units delivered (authorised)', String(del)], ['Still to arrive or waiting', String(ord - del - short.reduce((t, r) => t + r.l.quantity - r.l.received, 0))], ['Short on closed orders', String(short.reduce((t, r) => t + r.l.quantity - r.l.received, 0))], ['<b>Delivery rate</b>', `<b>${pct(del, ord)}%</b>`]]))}
+        ${panel('Ordered quantity against delivered quantity', 'only authorised goods count as delivered', tbl(['Order', 'Supplier', 'Product', 'Ordered', 'Delivered', 'Waiting', 'Difference', 'Status'],
+          rows.map(r => { const dif = r.l.received - r.l.quantity; return [`<b>${esc(r.o.number)}</b>`, esc(r.o.supplierName), esc(r.l.name), r.l.quantity, r.l.received, r.w || '—', dif === 0 ? '0' : `<span class="${dif < 0 ? 'pm-out' : 'pm-in'}">${dif}</span>`, pill(...r.st)]; }),
+          ['Total', '', '', ord, del, '', del - ord, ''], 'No orders in these dates.'), 'span3')}</div>` };
+  }
+  function vInv() {
+    const list = ctx.I, mg = may('purchases.manage');
+    return { csv: { name: 'supplier-invoices', rows: [['Reference', 'Supplier invoice no.', 'Supplier', 'Order', 'Invoice date', 'Due date', 'Total (KES)', 'VAT (KES)', 'Received value (KES)', 'Check', 'Recorded by'], ...list.map(i => { const o = S.pos.find(x => x.id === i.poId); return [i.ref, i.number, i.supplierName, i.poNumber, i.date, i.dueDate, money(i.amount), money(i.vat), o ? money(recvVal(o)) : '', o ? (matchPill(o).replace(/<[^>]+>/g, '')) : '', i.by]; })] },
+      html: panel('Supplier invoices', list.length + ' in these dates. Each is checked against the goods you authorised.', `<div class="pm-bar rp-noprint"><span class="grow sub" style="margin:0">Purchase cost comes from the order lines; invoices are what the supplier says you owe.</span>${mg ? '<button type="button" class="primary" data-a="inv">Record invoice</button>' : ''}</div>`
+        + tbl(['Invoice', 'Supplier', 'Order', 'Date', 'Due', 'Total', 'VAT', 'Check'], list.map(i => { const o = S.pos.find(x => x.id === i.poId); return [`<b>${esc(i.number)}</b><br><small>${esc(i.ref)}</small>`, esc(i.supplierName), esc(i.poNumber), esc(day(i.date)), esc(day(i.dueDate)) + (o && dueInfo(o).late ? ' ' + pill('out', 'Overdue') : ''), fmt(i.amount), fmt(i.vat), o ? matchPill(o) : '']; }),
+          ['Total', '', '', '', '', fmt(sum(list, i => i.amount)), fmt(sum(list, i => i.vat)), ''], 'No supplier invoices recorded in these dates.')) };
+  }
+  function vPay() {
+    const rows = ctx.allO.map(o => ({ o, recv: recvVal(o), paid: paidOf(o), ...dueInfo(o) })).filter(x => x.recv || x.paid || x.invoiced), due = sum(rows, x => x.due), mg = may('payments.manage'), pays = S.fin.supplierPayments.filter(p => !ctx.sid || (S.pos.find(o => o.id === p.poId) || {}).supplierId === ctx.sid).slice(0, 6);
+    const by = new Map(); rows.forEach(x => { if (x.due > 0) by.set(x.o.supplierName, (by.get(x.o.supplierName) || 0) + x.due); }); const items = [...by].sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value }));
+    return { csv: { name: 'supplier-balances', rows: [['Order', 'Supplier', 'Received value (KES)', 'Invoiced (KES)', 'Paid (KES)', 'Balance due (KES)', 'Due date', 'Status'], ...rows.map(x => [x.o.number, x.o.supplierName, money(x.recv), money(x.invoiced), money(x.paid), money(x.due), x.ds || '', x.due <= 0 ? 'Settled' : x.late ? 'Overdue' : 'Open'])] },
+      html: `<p class="rp-note">Balances are always up to date: the date filter does not change them. Money owed is the value of goods you have authorised, less payments.</p>
+        <div class="iv-grid">${panel('Owed by supplier', fmt(due) + ' in total', items.length ? hbars(items, i => fmt(i.value)) : '<p class="empty">No supplier balances.</p>', 'span2')}
+        ${panel('Latest payments', 'to suppliers', pays.length ? `<ul class="iv-list">${pays.map(p => `<li><div class="nm"><b>${esc(p.supplier)}</b><small>${esc(p.number)} · ${esc(METHODS[p.method] || p.method)} · ${esc(when(p.at))}</small></div><b class="rp-amt">${fmt(p.amount)}</b></li>`).join('')}</ul>` : '<p class="empty">No payments yet.</p>')}</div>
+        ${panel('Outstanding supplier payments', rows.length + ' orders', tbl(['Order', 'Supplier', 'Received value', 'Invoiced', 'Paid', 'Balance due', 'Due date', ''], rows.map(x => [`<b>${esc(x.o.number)}</b>`, esc(x.o.supplierName), fmt(x.recv), fmt(x.invoiced), fmt(x.paid),
+          x.due > 0 ? `<b>${fmt(x.due)}</b>` : pill('ok', 'Settled'), x.ds ? esc(day(x.ds)) + (x.late ? ' ' + pill('out', 'Overdue') : '') : '—', x.due > 0 && mg ? `<button class="primary" data-a="pay" data-id="${x.o.id}">Pay</button>` : '']),
+          ['Total', '', fmt(sum(rows, x => x.recv)), fmt(sum(rows, x => x.invoiced)), fmt(sum(rows, x => x.paid)), fmt(due), '', ''], 'No supplier balances yet. Authorise goods received first.'))}` };
+  }
+  function vSup() {
+    const list = S.sup.filter(s => !ctx.sid || s.id === ctx.sid), mg = may('purchases.manage'), owes = s => sum(S.pos.filter(o => o.supplierId === s.id).map(dueInfo), x => x.due);
+    return { csv: { name: 'suppliers', rows: [['Name', 'Contact person', 'Phone', 'Email', 'Address', 'KRA PIN', 'Payment terms (days)', 'Status', 'Open orders', 'Owed (KES)'], ...list.map(s => [s.name, s.contact || '', s.phone || '', s.email || '', s.address || '', s.pin || '', s.terms ?? 30, s.status === 'inactive' ? 'Switched off' : 'Active', S.pos.filter(o => o.supplierId === s.id && isOpen(o)).length, money(owes(s))])] },
+      html: panel('Suppliers', list.length + ' registered', `<div class="pm-bar rp-noprint"><span class="grow sub" style="margin:0">Contact details, tax PIN and payment terms for each supplier.</span>${mg ? '<button type="button" class="primary" data-a="addsup">Add supplier</button>' : ''}</div>`
+        + tbl(['Supplier', 'Contact', 'Phone', 'Email', 'Terms', 'Open orders', 'Owed', 'Status', ''], list.map(s => [`<b>${esc(s.name)}</b>${s.pin ? `<br><small>PIN ${esc(s.pin)}</small>` : ''}${s.address ? `<br><small>${esc(s.address)}</small>` : ''}`, esc(s.contact) || '—', s.phone ? `<a href="tel:${esc(s.phone)}">${esc(s.phone)}</a>` : '—',
+          s.email ? `<a href="mailto:${esc(s.email)}">${esc(s.email)}</a>` : '—', (s.terms ?? 30) + ' days', S.pos.filter(o => o.supplierId === s.id && isOpen(o)).length, canPay ? fmt(owes(s)) : '—', s.status === 'inactive' ? pill('out', 'Switched off') : pill('ok', 'Active'), mg ? `<button data-a="editsup" data-id="${s.id}">Edit</button>` : '']),
+          null, 'No suppliers yet. Add your first supplier.')) };
+  }
+  const VIEWS = { overview: vOverview, orders: vOrders, recv: vRecv, cmp: vCmp, inv: vInv, pay: vPay, sup: vSup };

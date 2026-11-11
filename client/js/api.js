@@ -46,6 +46,12 @@ const RealAPI = {
   suppliers: () => RealAPI.req('GET', '/suppliers'),
   saveSupplier: s => RealAPI.req('POST', '/suppliers', s),
   purchaseOrders: () => RealAPI.req('GET', '/purchase-orders'),
+  cancelPurchaseOrder: (id, reason) => RealAPI.req('POST', '/purchase-orders/' + id + '/cancel', { reason }),
+  closePurchaseOrder: (id, reason) => RealAPI.req('POST', '/purchase-orders/' + id + '/close', { reason }),
+  receipts: () => RealAPI.req('GET', '/goods-received'),
+  authoriseReceipt: (id, decision, note) => RealAPI.req('PATCH', '/goods-received/' + id, { decision, note }),
+  invoices: () => RealAPI.req('GET', '/supplier-invoices'),
+  saveInvoice: i => RealAPI.req('POST', '/supplier-invoices', i),
   createPurchaseOrder: o => RealAPI.req('POST', '/purchase-orders', o),
   receivePurchaseOrder: (id, r) => RealAPI.req('POST', '/purchase-orders/' + id + '/receipts', r),
   refund: (id, r) => RealAPI.req('POST', '/sales/' + id + '/refunds', r),
@@ -67,7 +73,7 @@ const ROLES = [
 const PERMISSIONS = [ // [id, label, group]
   ['dashboard.view', 'See the dashboard', 'Sales'], ['pos.use', 'Use the checkout and take payments', 'Sales'], ['sales.view', 'See sales history', 'Sales'],
   ['refunds.approve', 'Approve refunds', 'Sales'], ['discount.large', 'Give discounts above 5%', 'Sales'], ['customers.manage', 'Manage clients', 'Sales'],
-  ['products.manage', 'Add and edit products', 'Stock'], ['inventory.manage', 'Adjust stock levels', 'Stock'], ['purchases.manage', 'Create and receive purchase orders', 'Stock'],
+  ['products.manage', 'Add and edit products', 'Stock'], ['inventory.manage', 'Adjust stock levels', 'Stock'], ['purchases.manage', 'Register suppliers, order and record goods received and invoices', 'Stock'], ['purchases.approve', 'Authorise goods received (adds them to stock) and close short orders', 'Stock'],
   ['reports.view', 'See reports and profit', 'Reports'],
   ['users.view', 'See staff accounts', 'People'], ['users.manage', 'Create, edit and switch off accounts', 'People'], ['shifts.view', 'See cashier shifts', 'People'],
   ['audit.view', 'See the activity log', 'People'], ['payroll.export', 'Download payroll data', 'People'], ['permissions.manage', 'Change what each role can do', 'People'],
@@ -115,10 +121,11 @@ const MockAPI = (() => {
     if (!d.roles) { d.roles = structuredClone(DEFAULT_ROLES); changed = true; }
     if (!d.roles.super_admin) { d.roles.super_admin = PERMISSIONS.map(p => p[0]); changed = true; }
     // Permissions added after the data was first saved: give them to the roles that should have them (once), without undoing later changes
-    d.permsSeen ||= PERMISSIONS.map(p => p[0]).filter(p => !['payments.view', 'payments.manage', 'expenses.record', 'expenses.approve', 'credit.sell'].includes(p));
+    d.permsSeen ||= PERMISSIONS.map(p => p[0]).filter(p => !['payments.view', 'payments.manage', 'expenses.record', 'expenses.approve', 'credit.sell', 'purchases.approve'].includes(p));
     PERMISSIONS.map(p => p[0]).filter(p => !d.permsSeen.includes(p)).forEach(p => { Object.keys(DEFAULT_ROLES).forEach(r => { if (DEFAULT_ROLES[r].includes(p) && !(d.roles[r] ||= []).includes(p)) d.roles[r].push(p); }); d.permsSeen.push(p); changed = true; });
     if (!d.fin) { d.fin = { expenses: [], moves: [], recon: {}, supplierPayments: [], clientPayments: [], seq: { exp: 0, sp: 0, cp: 0 } }; changed = true; }
     if (!d.fin.clientPayments) { d.fin.clientPayments = []; changed = true; } if (!d.fin.seq) { d.fin.seq = { exp: 0, sp: 0, cp: 0 }; changed = true; }
+    if (!d.grns) { d.grns = []; changed = true; } if (!d.invoices) { d.invoices = []; changed = true; } if (!d.pos) { d.pos = []; changed = true; }
     if (!d.audit) { d.audit = []; changed = true; }
     if (!d.shifts) { d.shifts = []; changed = true; }
     seed().users.forEach(su => { if (!d.users.some(u => u.email === su.email)) { d.users.push(su); changed = true; } });
@@ -281,26 +288,80 @@ const MockAPI = (() => {
     async clientMe() { const m = sessionStorage.getItem('pos_client'); return m ? wait(JSON.parse(m)) : fail('Not signed in'); },
     async clientProducts() { return wait(load().products.map(p => ({ id: p.id, name: p.name, price: p.price, image: p.image || '', inStock: !p.trackStock || p.stock > 0 }))); }, // public: no cost or stock counts
     async clientPurchases() { const m = JSON.parse(sessionStorage.getItem('pos_client') || 'null'); if (!m) return fail('Not signed in'); return wait(load().sales.filter(s => s.customerId === m.id)); },
+    /* ---------- Purchasing and supplier management ---------- */
     async suppliers() { const d = load(); return wait(d.suppliers || []); },
-    async saveSupplier(s) { const d = load(); d.suppliers ||= []; if (!s.name) return fail('Supplier name is required.');
-      d.suppliers.push({ id: uid(), name: s.name, phone: s.phone || '', email: s.email || '' }); save(d); return wait(s); },
-    async purchaseOrders() { return wait(load().pos || []); },
-    async createPurchaseOrder({ supplierId, items }) {
-      const d = load(); d.pos ||= []; d.poSeq ||= 500; const sup = (d.suppliers || []).find(x => x.id === supplierId);
-      if (!can(d, 'purchases.manage')) return deny('create purchase orders'); if (!sup) return fail('Choose a supplier.');
-      if (!items.length || items.some(i => !(i.quantity >= 1) || i.unitCost < 0)) return fail('Every line needs a quantity of at least 1 and a valid cost.');
-      const lines = items.map(i => ({ productId: i.productId, name: d.products.find(p => p.id === i.productId).name, quantity: i.quantity, unitCost: i.unitCost, received: 0 }));
-      const po = { id: uid(), number: 'PO-' + (++d.poSeq), supplierId, supplierName: sup.name, items: lines, total: lines.reduce((t, l) => t + l.quantity * l.unitCost, 0), status: 'ORDERED', createdAt: new Date().toISOString(), by: me().name };
-      d.pos.unshift(po); log(d, 'PO_CREATE', po.number + ' · ' + sup.name); save(d); return wait(po);
+    async saveSupplier(s) {
+      const d = load(); d.suppliers ||= []; if (!can(d, 'purchases.manage')) return deny('manage suppliers');
+      const editing = s.id ? d.suppliers.find(x => x.id === s.id) : null; if (s.id && !editing) return fail('Supplier not found.');
+      const name = (s.name || '').trim(), email = (s.email || '').trim().toLowerCase(), phone = (s.phone || '').replace(/[\s-]/g, ''), terms = s.terms === '' || s.terms == null ? 30 : Math.round(+s.terms);
+      if (!name) return fail('Supplier name is required.'); if (email && !/^\S+@\S+\.\S+$/.test(email)) return fail('Enter a valid email or leave it empty.');
+      if (phone && !/^\+?\d{7,15}$/.test(phone)) return fail('Enter a valid phone number (digits only, 7 to 15).'); if (!(terms >= 0 && terms <= 365)) return fail('Payment terms must be between 0 and 365 days.');
+      if (d.suppliers.some(x => x.id !== s.id && x.name.toLowerCase() === name.toLowerCase())) return fail('A supplier with that name already exists.');
+      const status = s.status === 'inactive' ? 'inactive' : 'active', f = { name, contact: (s.contact || '').trim(), phone, email, address: (s.address || '').trim(), pin: (s.pin || '').trim().toUpperCase(), terms, status };
+      if (editing) { Object.assign(editing, f); log(d, 'SUPPLIER_EDIT', name + (status === 'inactive' ? ' · switched off' : '')); save(d); return wait(editing); }
+      const n = { id: uid(), ...f, createdAt: new Date().toISOString() }; d.suppliers.push(n); log(d, 'SUPPLIER_ADD', name); save(d); return wait(n);
     },
-    async receivePurchaseOrder(id, { items }) { // stock, cost, movements and PO status change together (one DB transaction later)
-      const d = load(), po = (d.pos || []).find(x => x.id === id); if (!can(d, 'purchases.manage')) return deny('receive stock'); if (!po) return fail('Purchase order not found.');
-      const todo = items.filter(i => i.quantity > 0); if (!todo.length) return fail('Enter a quantity received.');
-      for (const i of todo) { const l = po.items.find(x => x.productId === i.productId); if (i.quantity > l.quantity - l.received) return fail('Only ' + (l.quantity - l.received) + ' of ' + l.name + ' are still expected.'); }
-      todo.forEach(i => { const l = po.items.find(x => x.productId === i.productId), p = d.products.find(x => x.id === i.productId);
-        l.received += i.quantity; p.stock += i.quantity; p.cost = l.unitCost;
-        d.movements.unshift({ id: uid(), productId: p.id, name: p.name, type: 'RECEIVE', delta: i.quantity, reason: 'Received ' + po.number, by: me().name, at: new Date().toISOString() }); });
-      po.status = po.items.every(l => l.received >= l.quantity) ? 'RECEIVED' : 'PARTIAL'; save(d); return wait(po);
+    async purchaseOrders() { return wait(load().pos || []); },
+    async createPurchaseOrder({ supplierId, items, expected = '', note = '' }) {
+      const d = load(); d.pos ||= []; d.poSeq ||= 500; const sup = (d.suppliers || []).find(x => x.id === supplierId);
+      if (!can(d, 'purchases.manage')) return deny('create purchase orders'); if (!sup) return fail('Choose a supplier.'); if (sup.status === 'inactive') return fail(sup.name + ' is switched off. Switch the supplier on first.');
+      if (!Array.isArray(items) || !items.length || items.some(i => !(Number.isInteger(i.quantity) && i.quantity >= 1) || !(i.unitCost >= 0))) return fail('Every line needs a whole quantity of at least 1 and a valid cost.');
+      if (items.some(i => !d.products.some(p => p.id === i.productId))) return fail('A product on the order no longer exists.');
+      if (new Set(items.map(i => i.productId)).size !== items.length) return fail('The same product is on the order twice. Combine the lines.');
+      if (expected && (isNaN(new Date(expected)) || expected < new Date(Date.now() - 864e5).toISOString().slice(0, 10))) return fail('The expected delivery date cannot be in the past.');
+      const lines = items.map(i => ({ productId: i.productId, name: d.products.find(p => p.id === i.productId).name, quantity: i.quantity, unitCost: i.unitCost, received: 0 }));
+      const po = { id: uid(), number: 'PO-' + (++d.poSeq), supplierId, supplierName: sup.name, items: lines, total: lines.reduce((t, l) => t + l.quantity * l.unitCost, 0), status: 'ORDERED', expected, note: (note || '').trim(), createdAt: new Date().toISOString(), by: me().name };
+      d.pos.unshift(po); log(d, 'PO_CREATE', po.number + ' · ' + sup.name + ' · ' + fmtKes(po.total)); save(d); return wait(po);
+    },
+    async cancelPurchaseOrder(id, reason) {
+      const d = load(), po = (d.pos || []).find(x => x.id === id); if (!can(d, 'purchases.manage')) return deny('cancel purchase orders'); if (!po) return fail('Purchase order not found.');
+      if (!(reason || '').trim()) return fail('Give a reason for cancelling.'); if (po.status !== 'ORDERED') return fail('Only an order with nothing received can be cancelled. Close it short instead.');
+      if ((d.grns || []).some(g => g.poId === id && g.status === 'PENDING')) return fail('Authorise or reject the goods-received record first.'); if ((d.invoices || []).some(i => i.poId === id)) return fail('This order has a supplier invoice, so it cannot be cancelled.');
+      Object.assign(po, { status: 'CANCELLED', closedReason: reason.trim(), closedBy: me().name, closedAt: new Date().toISOString() }); log(d, 'PO_CANCEL', po.number + ' · ' + reason.trim()); save(d); return wait(po);
+    },
+    async closePurchaseOrder(id, reason) { // the supplier will not deliver the rest: the order is closed as delivered
+      const d = load(), po = (d.pos || []).find(x => x.id === id); if (!can(d, 'purchases.approve')) return deny('close orders short'); if (!po) return fail('Purchase order not found.');
+      if (!(reason || '').trim()) return fail('Give a reason for closing the order short.'); if (po.status !== 'PARTIAL') return fail('Only a part-delivered order can be closed short.');
+      if ((d.grns || []).some(g => g.poId === id && g.status === 'PENDING')) return fail('Authorise or reject the goods-received record first.');
+      Object.assign(po, { status: 'CLOSED', closedReason: reason.trim(), closedBy: me().name, closedAt: new Date().toISOString() }); log(d, 'PO_CLOSE', po.number + ' closed short · ' + reason.trim()); save(d); return wait(po);
+    },
+    async receipts() { const d = load(); return wait(d.grns || []); },
+    async receivePurchaseOrder(id, { items, deliveryNote = '', note = '' }) { // records what arrived (goods-received note). Stock only changes once someone authorises it.
+      const d = load(), po = (d.pos || []).find(x => x.id === id); if (!can(d, 'purchases.manage')) return deny('record goods received'); if (!po) return fail('Purchase order not found.');
+      if (!['ORDERED', 'PARTIAL'].includes(po.status)) return fail('This order is ' + (po.status === 'RECEIVED' ? 'fully received' : po.status.toLowerCase()) + '.');
+      const todo = (items || []).filter(i => i.quantity > 0); if (!todo.length) return fail('Enter a quantity received.');
+      const waiting = pid => (d.grns || []).filter(g => g.poId === id && g.status === 'PENDING').reduce((t, g) => t + (g.items.find(x => x.productId === pid)?.quantity || 0), 0);
+      for (const i of todo) { const l = po.items.find(x => x.productId === i.productId); if (!l) return fail('That product is not on this order.'); if (!Number.isInteger(i.quantity)) return fail('Quantities must be whole numbers.');
+        const left = l.quantity - l.received - waiting(i.productId); if (i.quantity > left) return fail(left > 0 ? 'Only ' + left + ' of ' + l.name + ' are still expected.' : l.name + ' is already fully received or waiting for authorisation.'); }
+      d.grnSeq ||= 0; const g = { id: uid(), number: 'GRN-' + (++d.grnSeq), poId: id, poNumber: po.number, supplierId: po.supplierId, supplierName: po.supplierName, deliveryNote: (deliveryNote || '').trim(), note: (note || '').trim(),
+        items: todo.map(i => { const l = po.items.find(x => x.productId === i.productId); return { productId: l.productId, name: l.name, quantity: i.quantity, unitCost: l.unitCost }; }), value: todo.reduce((t, i) => t + i.quantity * po.items.find(x => x.productId === i.productId).unitCost, 0),
+        status: 'PENDING', at: new Date().toISOString(), by: me().name, byId: me().id };
+      d.grns.unshift(g); log(d, 'GRN_ADD', g.number + ' · ' + po.number + ' · ' + fmtKes(g.value) + ' waiting for authorisation'); save(d); return wait(g);
+    },
+    async authoriseReceipt(id, decision, note = '') { // stock, cost, movements and the order status change together (one DB transaction later)
+      const d = load(), a = actor(d), g = (d.grns || []).find(x => x.id === id); if (!can(d, 'purchases.approve')) return deny('authorise goods received'); if (!g) return fail('Goods-received record not found.');
+      if (!['AUTHORISED', 'REJECTED'].includes(decision)) return fail('Unknown decision.'); if (g.status !== 'PENDING') return fail('This record was already ' + g.status.toLowerCase() + '.');
+      if (g.byId === a.id && !isTop(a.role)) return fail('Someone else must authorise goods you recorded.'); if (decision === 'REJECTED' && !(note || '').trim()) return fail('Say why the goods are rejected.');
+      const po = d.pos.find(x => x.id === g.poId);
+      if (decision === 'AUTHORISED') {
+        for (const i of g.items) { const l = po.items.find(x => x.productId === i.productId); if (i.quantity > l.quantity - l.received) return fail('That would be more than was ordered of ' + l.name + '.'); }
+        g.items.forEach(i => { const l = po.items.find(x => x.productId === i.productId), p = d.products.find(x => x.id === i.productId); l.received += i.quantity; if (p) { p.stock += i.quantity; p.cost = l.unitCost;
+          d.movements.unshift({ id: uid(), productId: p.id, name: p.name, type: 'RECEIVE', delta: i.quantity, reason: 'Received ' + po.number + ' (' + g.number + ')', by: me().name, at: new Date().toISOString() }); } });
+        po.status = po.items.every(l => l.received >= l.quantity) ? 'RECEIVED' : 'PARTIAL';
+      }
+      Object.assign(g, { status: decision, decidedBy: a.name, decidedAt: new Date().toISOString(), decision: (note || '').trim() });
+      log(d, decision === 'AUTHORISED' ? 'GRN_OK' : 'GRN_NO', g.number + ' · ' + po.number + (decision === 'AUTHORISED' ? ' · stock updated' : ' · rejected: ' + (note || '').trim())); save(d); return wait(g);
+    },
+    async invoices() { const d = load(); return wait(d.invoices || []); },
+    async saveInvoice({ poId, number, date, dueDate, amount, vat = 0, note = '' }) { // the supplier's bill. It records what the supplier says is owed; stock and payments are tracked separately.
+      const d = load(), po = (d.pos || []).find(x => x.id === poId); if (!can(d, 'purchases.manage')) return deny('record supplier invoices'); if (!po) return fail('Choose the purchase order this invoice is for.');
+      if (po.status === 'CANCELLED') return fail('That order was cancelled.'); number = (number || '').trim(); if (!number) return fail('Enter the supplier\'s invoice number.');
+      if (d.invoices.some(i => i.supplierId === po.supplierId && i.number.toLowerCase() === number.toLowerCase())) return fail('That invoice number is already recorded for ' + po.supplierName + '.');
+      if (!(amount > 0)) return fail('Enter the invoice total.'); if (!(vat >= 0) || vat > amount) return fail('VAT cannot be more than the invoice total.');
+      const at = new Date(date); if (isNaN(at) || at > new Date(Date.now() + 864e5)) return fail('Enter a valid invoice date that is not in the future.');
+      const terms = (d.suppliers.find(s => s.id === po.supplierId)?.terms ?? 30), due = dueDate ? new Date(dueDate) : new Date(at.getTime() + terms * 864e5); if (isNaN(due) || due < new Date(at.toDateString())) return fail('The due date cannot be before the invoice date.');
+      d.invSeq ||= 0; const inv = { id: uid(), ref: 'SI-' + (++d.invSeq), number, poId, poNumber: po.number, supplierId: po.supplierId, supplierName: po.supplierName, date: at.toISOString().slice(0, 10), dueDate: due.toISOString().slice(0, 10), amount, vat, note: (note || '').trim(), at: new Date().toISOString(), by: me().name };
+      d.invoices.unshift(inv); log(d, 'INVOICE_ADD', number + ' · ' + po.supplierName + ' · ' + fmtKes(amount)); save(d); return wait(inv);
     },
     async refund(saleId, { items, reason }) { // manager approval + restock + movement + sale update in one step (one DB transaction later)
       const d = load(), s = d.sales.find(x => x.id === saleId);
